@@ -61,7 +61,11 @@ From one datacentre address in Finland, headless, no proxy and no key:
   why headless is the default;
 - **no captcha was met at all** — zero markers of any vendor and zero captcha
   configuration across twelve captures. That is what happened, not what is
-  possible: the site is behind Cloudflare and this repo implements the solve.
+  possible: the site is behind Cloudflare and this repo implements the solve;
+- **a second address agrees.** The canary's first dispatch, on a bare GitHub
+  runner with no proxy, returned 70 markets from 20 events on the `--mode
+  events` walk and 92 from 20 on `/predictions` — the same twenty events per
+  listing from another continent.
 
 ### Fixed during the rebuild
 

@@ -130,6 +130,12 @@ no proxy, no key:
 All three engines returned **identical rows** on the same URL — same 70 skus,
 same sidecar, same exit code.
 
+And from a second address entirely: the canary's first dispatch, on a bare
+GitHub runner with no proxy and no key, returned **70 markets from 20 events**
+on the `--mode events` walk (4 pages, 4 deep rows) and **92 markets from 20
+events** on `/predictions`, with the site's own totals at 4,138 and 21,585.
+Two addresses on two continents, the same twenty events per listing.
+
 One number worth reading twice: in the `--mode events` run, five of the event
 pages carried markets the listing had not shown at all (74 rows against page
 1's 70). A listing shows an event's leading markets; its own page shows all
