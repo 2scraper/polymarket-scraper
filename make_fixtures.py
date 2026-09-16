@@ -276,14 +276,22 @@ def _trim_tiles(html, keep_slugs):
     return str(soup)
 
 
-def _payload_window(payload, keep_skus):
+def _payload_window(payload, keep_skus, keep_foreign=0):
     """The slice of the payload holding the objects we are keeping.
 
     An event page has no `results` array to trim, and most of its 450 KB is
-    the rail of related events beside the market. This keeps the span from
-    the first wanted object to the last and drops the rest; a cut that lands
-    inside some other object simply leaves text that will not decode, which
-    the scanner skips.
+    the rail of related events beside the market. This keeps the objects the
+    fixture is about and drops the rest; a cut that lands inside some other
+    object simply leaves text that will not decode, which the scanner skips.
+
+    `keep_foreign` keeps that many objects belonging to OTHER events on
+    purpose, and it is not an optimisation — it is what makes the scoping
+    check able to fail. An event page ships its rails' markets as well as its
+    own, and `markets_from_flight` scopes rows to the event the URL asked
+    for. Trim the rails away and that rule cannot be broken by any change,
+    so the test asserting it passes on a fixture with nothing to scope out —
+    a check that looks load-bearing and is not (§17). Found by deleting the
+    scoping and watching the suite stay green.
     """
     spans = []
     # A listing's grid is kept as the `"results":[…]` array it arrives in,
@@ -311,6 +319,21 @@ def _payload_window(payload, keep_skus):
                 if slugs & keep_skus:
                     spans.append((start, end))
             position = payload.find(marker, position + 1)
+    if keep_foreign:
+        foreign = []
+        for marker in ('"outcomePrices"',):
+            position = payload.find(marker)
+            while position != -1 and len(foreign) < keep_foreign:
+                hit = P._enclosing_object(payload, position)
+                if hit:
+                    start, end, obj = hit
+                    slug = obj.get("slug")
+                    if slug and slug not in keep_skus and \
+                            not any(start >= s0 and end <= e0 for s0, e0 in spans):
+                        foreign.append((start, end))
+                position = payload.find(marker, position + 1)
+        spans.extend(foreign)
+
     if not spans:
         return None
     # Keep the OUTERMOST spans only, and concatenate them rather than
@@ -383,7 +406,10 @@ def build(name, filename, url, keep):
         # trees — and none of that is what any check here is about.
         rebuilt = P.parse_markets(
             _rebuild(original, chunks, shorter), url)
-        window = _payload_window(shorter, {row.sku for row in rebuilt})
+        # An event page keeps two of its rails' markets, so the scoping rule
+        # has something to scope out and the check asserting it can fail.
+        window = _payload_window(shorter, {row.sku for row in rebuilt},
+                                 keep_foreign=0 if keep is not None else 2)
         if window:
             shorter = window
         trimmed = _rebuild(original, chunks, shorter)

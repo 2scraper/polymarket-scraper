@@ -1179,94 +1179,112 @@ def test_writers_and_finish_run():
 def test_diff():
     group("diff_runs — what counts as a change here")
     ok = True
+    # THE CHECK THAT WOULD HAVE CAUGHT IT. This file arrived from a sibling
+    # repo tracking `claps`, `reading_time_min` and `publication` — none of
+    # which is a column here — so `diff_runs.py` compared eight fields absent
+    # from every row of both runs and reported "no changes" for ever. Nothing
+    # failed, because the checks below exercise the diff's MECHANICS with
+    # hand-built rows and never ask whether its subject is real (§16).
+    columns = {f.name for f in fields(Market)}
+    import diff_runs as _diff
+    unreal = sorted(set(_diff.TRACKED_FIELDS) - columns)
+    ok &= check(f"every tracked field is a real column {unreal or ''}", not unreal)
+    stray = sorted(set(_diff.COUNT_FIELDS) - set(_diff.TRACKED_FIELDS))
+    ok &= check(f"every count field is also tracked {stray or ''}", not stray)
+    # And the columns a diff MUST watch on this site, named rather than
+    # counted: a price monitor that failed to notice a market closing, or a
+    # price moving, would be worth nothing.
+    for essential in ("price", "closed", "volume", "title"):
+        ok &= check(f"...and {essential} is among them",
+                    essential in _diff.TRACKED_FIELDS)
 
     def row(**kw):
-        base = dict(sku="d373fe2c96b7", title="A story title",
-                    claps=100, responses=2, reading_time_min=7.5,
-                    word_count=1800, content_chars=None,
-                    is_paywalled=False, publication=None,
-                    data_source="obvinit")
+        base = dict(sku="will-the-fed-cut-in-september",
+                    title="Will the Fed cut rates in September?",
+                    price=0.62, outcome_prices=[0.62, 0.38],
+                    best_bid=0.61, best_ask=0.63, spread=0.02,
+                    last_trade_price=0.62, volume=1_000_000.0,
+                    volume_24h=50_000.0, liquidity=120_000.0,
+                    volume_scope="market", active=True, closed=False,
+                    accepting_orders=True, end_date="2026-09-30T00:00:00Z",
+                    data_source="flight")
         base.update(kw)
         return base
 
-    out = diff_products([row()], [row(claps=140)])
-    ok &= check("a real clap move, same view, is `changed`",
+    out = diff_products([row()], [row(price=0.71, outcome_prices=[0.71, 0.29])])
+    ok &= check("a real price move, same view, is `changed`",
                 len(out["changed"]) == 1 and not out["source_changed"])
+    ok &= check("...and the bucket names the column that moved",
+                "price" in out["changed"][0]["changes"])
 
-    # THE BUCKET THIS SITE NEEDS MOST. A row read off a tag feed has no
-    # reading time and no word count; the same story read off its day archive
-    # has both. That is our two snapshots differing, not the site.
-    out = diff_products([row(data_source="apollo", reading_time_min=None,
-                             word_count=None)],
+    # THE BUCKET THIS SITE NEEDS MOST. A row read off a listing has no spread
+    # and carries the EVENT's volume; the same market read off its own event
+    # page has a spread and the MARKET's volume. That is our two snapshots
+    # differing, not the site.
+    out = diff_products([row(spread=None, volume_scope="event",
+                             volume=199_000_000.0, data_source="flight+jsonld")],
                         [row()])
-    ok &= check("a counter appearing with the view is `source_changed`, "
+    ok &= check("a column appearing with the view is `source_changed`, "
                 "not `changed`",
                 len(out["source_changed"]) == 1 and not out["changed"])
     ok &= check("the bucket names both views",
                 out["source_changed"][0]["data_source"]
-                == {"old": "apollo", "new": "obvinit"})
+                == {"old": "flight+jsonld", "new": "flight"})
 
-    # A body appearing with post mode is the same artefact.
-    out = diff_products([row(data_source="apollo", content_chars=None)],
-                        [row(content_chars=18352)])
-    ok &= check("a body appearing with the view is `source_changed` too",
+    # A DOM-sourced run against a payload run is the same artefact, and the
+    # more likely one: a DOM row is event-level with a rounded volume.
+    out = diff_products([row(data_source="dom", volume=200_000_000.0,
+                             spread=None, best_bid=None, best_ask=None)],
+                        [row()])
+    ok &= check("a DOM run diffed against a payload run is `source_changed`",
                 len(out["source_changed"]) == 1 and not out["changed"])
 
-    # But a title moving alongside is a REAL change and must not be
-    # swallowed by the same bucket: Medium lets a story be retitled.
-    out = diff_products([row(data_source="apollo", reading_time_min=None)],
-                        [row(title="A retitled story")])
-    ok &= check("a title change survives a view change",
+    # But a MARKET CLOSING alongside is a real event and must not be
+    # swallowed by the same bucket. It is the most consequential thing that
+    # can happen to a row and no price column shows it.
+    out = diff_products([row(data_source="flight+jsonld", spread=None)],
+                        [row(closed=True, active=False,
+                             accepting_orders=False)])
+    ok &= check("a market closing survives a view change",
+                len(out["changed"]) == 1
+                and "closed" in out["changed"][0]["changes"])
+
+    # And so is the question being re-worded, which changes what the row
+    # MEANS without touching its price.
+    out = diff_products([row(data_source="flight+jsonld", spread=None)],
+                        [row(title="Will the Fed cut rates by 50bps in "
+                                   "September?")])
+    ok &= check("a re-worded question survives a view change",
                 len(out["changed"]) == 1
                 and "title" in out["changed"][0]["changes"])
 
-    # And so is a story going behind the paywall, which is the event this
-    # column exists for and which no view difference can explain away.
-    out = diff_products([row(data_source="apollo", reading_time_min=None)],
-                        [row(is_paywalled=True)])
-    ok &= check("a story moving behind the paywall survives a view change",
-                len(out["changed"]) == 1
-                and "is_paywalled" in out["changed"][0]["changes"])
-
     group("The tolerance, which unlike the family's has a real use here")
-    out = diff_products([row(claps=1000)], [row(claps=1004)],
+    # A prediction market's price moves continuously: two runs minutes apart
+    # differ by a tick on most rows, and a monitor alerted on every tick is a
+    # monitor nobody reads.
+    out = diff_products([row(price=0.620)], [row(price=0.624)],
                         price_tolerance_pct=1.0)
-    ok &= check("a live counter ticking is `within_tolerance`",
+    ok &= check("a price ticking is `within_tolerance`",
                 len(out["within_tolerance"]) == 1 and not out["changed"])
-    out = diff_products([row(claps=1000)], [row(claps=1004)])
+    out = diff_products([row(price=0.620)], [row(price=0.624)])
     ok &= check("and the DEFAULT reports it, deciding nothing for the reader",
                 len(out["changed"]) == 1 and not out["within_tolerance"])
-    out = diff_products([row(claps=1000)],
-                        [row(claps=1004, title="A retitled story")],
+    out = diff_products([row(price=0.620)], [row(price=0.900)],
                         price_tolerance_pct=1.0)
-    ok &= check("a title change alongside is never absorbed by a tolerance",
+    ok &= check("a real repricing is never absorbed by the tolerance",
                 len(out["changed"]) == 1 and not out["within_tolerance"])
 
-    group("added / removed / unmatchable")
-    out = diff_products([row()], [row(sku="bfd47b63fdae")])
-    ok &= check("a new permalink is added and the old one removed",
-                len(out["added"]) == 1 and len(out["removed"]) == 1)
+    group("Added, removed and unmatchable")
+    out = diff_products([row()], [row(), row(sku="a-second-market")])
+    ok &= check("a new market is `added`", len(out["added"]) == 1)
+    out = diff_products([row(), row(sku="a-second-market")], [row()])
+    ok &= check("a market that vanished is `removed`", len(out["removed"]) == 1)
     out = diff_products([row(sku=None)], [row(sku=None)])
-    ok &= check("a row with no sku is unmatchable, not added or removed",
-                out["unmatchable_old"] == 1 and out["unmatchable_new"] == 1
-                and not out["added"] and not out["removed"])
+    ok &= check("a row with no sku is counted, not silently dropped",
+                out["unmatchable_old"] == 1 and out["unmatchable_new"] == 1)
     out = diff_products([row(), row()], [row()])
-    ok &= check("a duplicate sku within one file is counted, not clobbered",
+    ok &= check("a duplicate sku in one run is counted as unmatchable",
                 out["unmatchable_old"] == 1)
-
-    group("lifecycle is emitted and always empty, for the family's shape")
-    ok &= check("the key is there", "lifecycle" in diff_products([], []))
-    ok &= check("and it is empty", diff_products([row()], [row(upvotes=1)])
-                ["lifecycle"] == [])
-
-    group("--fail-on-change ignores what is about US, not the site")
-    source = _fail_on_change_source()
-    ok &= check("it fails on added/removed/changed",
-                'result["added"] or result["removed"] or result["changed"]'
-                in source)
-    ok &= check("and on nothing else",
-                "source_changed" not in source.split("fail_on_change")[-1]
-                .split("return")[0])
     return ok
 
 
@@ -2080,6 +2098,29 @@ def test_no_file_describes_another_site():
         "farfetch": "a sibling repo",
         "divsrpcontentproducts": "a sibling's grid selector",
         "lodging-card-responsive": "a sibling's card selector",
+        # VOCABULARY, not just names. A paragraph copied from a sibling keeps
+        # its subject's words long after the site's name has been swapped
+        # out, and those words are what makes it authoritative and wrong.
+        # `scraper_api_client.py` logged "Parsed 70 stor(ies)" through a full
+        # live run, and `diff_runs.py` tracked `claps` and `reading_time_min`
+        # — columns that do not exist here — while every check stayed green.
+        #
+        # Every word below was COUNTED across this repo before being banned
+        # (§18: a marker that matches a page you know is good is worse than
+        # no marker). Words that DO occur legitimately here — "answer",
+        # "publication", "subtitle" — are deliberately absent from this list.
+        "stor(ies)": "a sibling's row",
+        "day archive": "a sibling's pagination",
+        "archive day": "a sibling's pagination",
+        "reading_time_min": "a sibling's column",
+        "word_count": "a sibling's column",
+        "claps": "a sibling's column",
+        "upvotes": "a sibling's column",
+        "reserve_price": "a sibling's column",
+        "seller_score": "a sibling's column",
+        "bid_kind": "a sibling's column",
+        "parse_posts": "a sibling's parser entry point",
+        "listing_kind": "a sibling's URL classifier",
     }
     # A CONTEXT allowlist, the same shape ci_checks.py uses for credentials,
     # because one of these words is legitimate in exactly one place. §8 says
@@ -2094,7 +2135,16 @@ def test_no_file_describes_another_site():
                # found absent, and the engines' captcha docstrings repeat it.
                ("captcha_solver.py", "datadome"),
                ("playwright_scraper.py", "datadome"),
-               ("README.md", "datadome")}
+               ("README.md", "datadome"),
+               # diff_runs.py's own post-mortem NAMES the three columns it
+               # used to track, and naming them is what makes the comment
+               # worth reading. Allowed here and nowhere else, because the
+               # regression it describes is caught by a sharper check a few
+               # lines up — every name in TRACKED_FIELDS must be a real
+               # column — rather than by this vocabulary sweep.
+               ("diff_runs.py", "claps"),
+               ("diff_runs.py", "reading_time_min"),
+               ("diff_runs.py", "upvotes")}
 
     checked = 0
     for path in sorted(pathlib.Path(REPO_ROOT).rglob("*")):

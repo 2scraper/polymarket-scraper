@@ -17,26 +17,24 @@ filename, diffed against the previous one:
     python3 diff_runs.py --old "ml_$(ls -t ml_*.json | sed -n 2p)" \\
                           --new "ml_$(date +%F).json" --out diff.json
 
-Four buckets, each keyed on sku — here the answer's permalink:
+Four buckets, each keyed on sku — here the market's slug:
 
   added          — sku present in --new, absent from --old
   removed        — sku present in --old, absent from --new (deleted or
                    collapsed, or just off this particular feed run)
-  changed        — sku present in both, with a different clap count, response
-                   count, answer count, title or body length
-  source_changed — sku present in both with a different count, but also a
+  changed        — sku present in both, with a different price, order book,
+                   volume, liquidity, state or question
+  source_changed — sku present in both with a different value, but also a
                    different `data_source`. That is the bucket this site
-                   needs most: claps, responses, reading time and the full
-                   reading time and word count come from the view that
-                   built the row and are
-                   NULL on a row built from the rendered card alone, so a
-                   topic run diffed against a question run would report every
-                   count as having appeared or vanished. Reported separately
-                   because it says something about our own two snapshots, not
-                   about the site — and --fail-on-change deliberately ignores
-                   it.
+                   needs most: `spread`, the volume windows and the on-chain
+                   ids are published by an EVENT page and by nothing else, so
+                   a `markets` run diffed against an `events` run would
+                   report every one of them as having appeared from nowhere.
+                   Reported separately because it says something about our
+                   own two snapshots rather than about the site — and
+                   --fail-on-change deliberately ignores it.
 
-An answer this project's parser could not recover a sku for (None) cannot be
+A market this project's parser could not recover a sku for (None) cannot be
 matched across runs at all, so it is counted and reported separately rather
 than silently folded into "added"/"removed", which would be wrong on its face.
 """
@@ -57,30 +55,56 @@ from output_writer import UNIQUE_BY_SKU_MODES
 #
 # `title` IS tracked, unusually for this family: it is the QUESTION, and
 # Polymarket lets a market be re-worded and re-slugged.
-# That is a real
-# event and there is no other column that would show it.
+# WHAT COUNTS AS A CHANGE ON THIS SITE, and why each of these and not more.
 #
-# `content_chars` rather than `content`: a story body runs to tens of
-# thousands of characters, and a diff that printed two of them per changed
-# row would be unreadable. The length moving is the signal that the body did.
+# These names are CHECKED against the row class by the offline suite, and
+# that check exists because this file arrived from a sibling repo tracking
+# `claps`, `reading_time_min` and `publication` — none of which is a column
+# here. Nothing failed: `diff_runs.py` simply compared eight fields that were
+# absent from every row of both runs and reported "no changes" for ever.
+# That is this family's most common bug shape — a tool doing less than it
+# says while reporting success (§16) — and it survived a green suite because
+# the suite tested the DIFF's mechanics rather than its subject.
 #
-# `is_paywalled` and `publication` are here because both genuinely change
-# without the market changing: a venue re-words a question and
-# behind the paywall, and a publication accepts or drops a submission after
-# it is published. Those are exactly the events a price monitor's equivalent
-# would want.
-TRACKED_FIELDS = ("claps", "responses", "reading_time_min", "word_count",
-                  "content_chars", "title", "is_paywalled", "publication")
+#   price / outcome_prices   the whole point. A prediction market IS its
+#                            price, and `outcome_prices` catches a move in an
+#                            outcome that is not the first one.
+#   best_bid / best_ask /    the book around that price. A spread that opens
+#   spread                   while the price holds still is an event a
+#                            monitor wants, and none of the three is visible
+#                            in `price`.
+#   last_trade_price         where it actually traded, as opposed to where it
+#                            is quoted.
+#   volume / volume_24h /    what moved through it. `volume_scope` rides in
+#   liquidity                TRACKED_FIELDS too, because a volume that
+#                            "changed" only because one run read the event's
+#                            total and the other the market's own is not a
+#                            change at all.
+#   active / closed /        the state transitions that end a market's life.
+#   accepting_orders         A market closing is the most consequential thing
+#                            that can happen to a row, and no price column
+#                            shows it.
+#   title / end_date         the question being re-worded or its deadline
+#                            moved — both happen without the price moving,
+#                            and both change what the row MEANS.
+#
+# Deliberately NOT tracked: `scraped_at` (it differs by construction),
+# `page`/`position` (a listing's ranking churns constantly and is not a
+# property of the market), and `tags` (editorial).
+TRACKED_FIELDS = ("price", "outcome_prices", "best_bid", "best_ask", "spread",
+                  "last_trade_price", "volume", "volume_24h", "liquidity",
+                  "active", "closed", "accepting_orders", "title", "end_date",
+                  "volume_scope")
 
 # The subset of TRACKED_FIELDS whose presence depends on WHICH VIEW built the
 # row, and whose comparability therefore depends on both runs having read the
-# same one. `reading_time_min` and `word_count` are null on a tag-feed row and
-# populated on an archive row by the site's own design, and `content_chars`
-# is null on every listing row and populated only in post mode. A tag run
-# diffed against an archive or post run would otherwise report all of them as
-# having appeared from nowhere — see diff_products.
-COUNT_FIELDS = ("claps", "responses", "reading_time_min", "word_count",
-                "content_chars")
+# same one. `spread` and `volume_1w` are published by an event page and by
+# nothing else; `volume` means the EVENT's total on a listing row and the
+# MARKET's own on an event row, which is why `volume_scope` is tracked
+# beside it. A `markets` run diffed against an `events` run would otherwise
+# report all of them as having appeared from nowhere — see diff_products.
+COUNT_FIELDS = ("price", "best_bid", "best_ask", "spread", "last_trade_price",
+                "volume", "volume_24h", "liquidity")
 
 
 def _load(path: str) -> List[dict]:
@@ -111,19 +135,19 @@ def _within_tolerance(before: dict, after: dict, changes: dict,
                       tolerance_pct: float) -> bool:
     """True if every differing count field moved by less than `tolerance_pct`.
 
-    Unlike in most of this family, this flag has a real use here and the
-    reason is worth stating. This site's numbers are LIVE: a market
-    carried 1,733 views, and a view count that ticks by a handful between two
-    runs of the same command is not an event anybody wants alerted on. A
-    monitor watching for a post going viral wants a threshold; a monitor
-    watching for an answer being edited wants `text_chars`, which is not a
-    count field and is never absorbed by this.
+Unlike in most of this family, this flag has a real use here and the
+    reason is worth stating. A prediction market's price moves CONTINUOUSLY:
+    two runs of the same command minutes apart will differ on most rows by a
+    tick, and a monitor alerted on every tick is a monitor nobody reads. A
+    monitor watching for a real repricing wants a threshold; a monitor
+    watching for a market CLOSING wants `closed`, which is not a count field
+    and is never absorbed by this.
 
     It still DEFAULTS TO ZERO, because the default should report what
     happened rather than decide for the reader what was interesting.
 
     A move is judged on the LARGEST relative change among the count fields,
-    so a genuine collapse in claps is not hidden by a tolerance applied
+    so a genuine collapse in one price is not hidden by a tolerance applied
     field-by-field.
     """
     if tolerance_pct <= 0:
@@ -171,18 +195,28 @@ def diff_products(old: List[dict], new: List[dict],
         # Upvotes, views, shares, comments and the question answer count come
         # from the payload the view carried, which an archive or author page
         # carries and a topic page does not. So a row read off a topic feed
-        # has null counts and the same row read off its question page has
-        # real ones, and diffing the two would report every counter as having
-        # appeared from nowhere. `text_chars` moves for the same reason: a
-        # card body is truncated to three lines and the payload one is the
-        # whole answer.
+        # has no spread and carries its EVENT's volume, and the same market
+        # read off its own event page has a spread and the MARKET's volume.
+        # Diffing the two would report every one of them as having appeared
+        # from nowhere or collapsed by two orders of magnitude.
+        #
+        # TWO columns decide "which view", not one, and the second is the
+        # subtle one. `data_source` is `flight` on a listing row AND on an
+        # event-page row — the payload is the payload — so a `markets` run
+        # diffed against an `events` run agrees on it while disagreeing about
+        # what `volume` MEANS. `volume_scope` is the column that says which,
+        # and a run where it moved is a run that changed its view. Without it
+        # the most likely diff anyone will actually run here — yesterday's
+        # listing against today's deep walk — reports a 199,000,000 ->
+        # 19,000,000 "collapse" on rows where nothing happened at all.
         #
         # `--fail-on-change` ignores this bucket for the same reason it
         # ignores a tolerance move: it says which view we read, not what
         # changed on the site.
         sources = (before.get("data_source"), after.get("data_source"))
-        view_fields = COUNT_FIELDS + ("text_chars",)
-        if sources[0] != sources[1] and any(
+        scopes = (before.get("volume_scope"), after.get("volume_scope"))
+        view_fields = COUNT_FIELDS + ("volume_scope",)
+        if (sources[0] != sources[1] or scopes[0] != scopes[1]) and any(
                 f in field_changes for f in view_fields):
             view_part = {f: v for f, v in field_changes.items()
                          if f in view_fields}
@@ -191,6 +225,7 @@ def diff_products(old: List[dict], new: List[dict],
             source_changed.append({
                 "sku": sku, "title": after.get("title"),
                 "data_source": {"old": sources[0], "new": sources[1]},
+                "volume_scope": {"old": scopes[0], "new": scopes[1]},
                 "changes": view_part,
             })
             field_changes = other_part
@@ -241,10 +276,10 @@ def _print_summary(result: dict) -> None:
           f"tolerance.")
     for p in result["added"]:
         print(f"  + {p.get('sku')}  {p.get('title')}  "
-              f"{p.get('claps')} clap(s) by {p.get('author')}")
+              f"{p.get('price')} in {p.get('event_slug')}")
     for p in result["removed"]:
         print(f"  - {p.get('sku')}  {p.get('title')}  "
-              f"{p.get('claps')} clap(s) by {p.get('author')}")
+              f"{p.get('price')} in {p.get('event_slug')}")
     for c in result["changed"]:
         deltas = ", ".join(f"{f}: {v['old']!r} -> {v['new']!r}"
                            for f, v in c["changes"].items())
@@ -258,11 +293,13 @@ def _print_summary(result: dict) -> None:
         src = c["data_source"]
         deltas = ", ".join(f"{f}: {v['old']!r} -> {v['new']!r}"
                            for f, v in c["changes"].items())
+        scope = c.get("volume_scope") or {}
         print(f"  ? {c['sku']}  {c['title']}  {deltas}  "
-              f"[data_source {src['old']!r} -> {src['new']!r}: the two runs "
-              f"read different views of the same answer, so this is not a "
-              f"site-side change. A topic feed carries no counts at all; a "
-              f"question or profile page does]")
+              f"[data_source {src['old']!r} -> {src['new']!r}, volume_scope "
+              f"{scope.get('old')!r} -> {scope.get('new')!r}: the two runs "
+              f"read different views of the same market, so this is not a "
+              f"site-side change. A listing row has no spread and carries "
+              f"its EVENT's volume; an event-page row has both of its own]")
     unmatchable = result["unmatchable_old"] + result["unmatchable_new"]
     if unmatchable:
         print(f"[!] {unmatchable} row(s) across both files had no sku or a "
@@ -331,8 +368,8 @@ def _check_comparable(args) -> bool:
     #
     # `source` is the host that served a row. On this site it is
     # `polymarket.com` on every row — the eighteen locales are PATHS
-    # publication's custom domain. A run whose rows carry several of those is
-    # NORMAL here — an ordinary tag feed mixes all three — so a mixed run is
+    # one host only. A run whose rows carry more than one is
+    # NOT normal here and is worth saying out loud — so a mixed run is
     # never refused. What IS worth saying is when two runs each landed
     # consistently on a DIFFERENT single host, because then `added` and
     # `removed` would be describing the address rather than the catalogue.
@@ -360,7 +397,7 @@ def _check_comparable(args) -> bool:
             f"serves one story from several addresses, so this is usually a "
             f"different URL rather than a different catalogue — but added "
             f"and removed would describe the address change rather than "
-            f"anything about the stories.")
+            f"anything about the markets.")
 
     if not problems:
         return True

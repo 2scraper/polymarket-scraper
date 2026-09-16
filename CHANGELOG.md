@@ -65,7 +65,15 @@ From one datacentre address in Finland, headless, no proxy and no key:
 - **a second address agrees.** The canary's first dispatch, on a bare GitHub
   runner with no proxy, returned 70 markets from 20 events on the `--mode
   events` walk and 92 from 20 on `/predictions` — the same twenty events per
-  listing from another continent.
+  listing from another continent;
+- **every credential-gated path was run end to end** (§16), and all of them
+  return the same 70 markets a local browser does: the Scraper API at
+  $0.0005 for 766,857 bytes in 11s, the Scraping Browser over CDP, and a
+  fingerprint fetched and applied (user agent, locale `en-US`, timezone
+  `America/New_York`). The Fingerprint API's documented multi-tag example is
+  rejected with HTTP 400 and this repo's default is the single `Windows` tag
+  that works — the §17 defect that made `--fingerprint` inert in four
+  sibling repos is not present here.
 
 ### Fixed during the rebuild
 
