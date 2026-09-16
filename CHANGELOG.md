@@ -12,6 +12,16 @@ from a row count, it leads the section in a blockquote.
 
 ### Added
 
+- **A fixture fetched over the Scraping Browser, and the census behind it.**
+  Asked which captcha the site had, the honest answer needed a count rather
+  than a re-reading of the code — and the count found that every captcha
+  string this project has seen on polymarket.com is injected by 2Captcha's
+  own auto-solve extension. The same URL, the same minute: 0 of everything
+  from the site, 21 `captcha` / 16 extension scripts / 1 `cf-turnstile` over
+  the Scraping Browser. All eleven previous fixtures came from a local
+  browser or curl, so the marker checks would have passed with
+  `cf-turnstile` in the set; now they do not (§21).
+
 - **A README section on the container**, which the repo shipped and
   documented nowhere. Measured rather than described: the image is 1.34 GB,
   its entrypoint answers `--help`, a run inside it returns the same 70
