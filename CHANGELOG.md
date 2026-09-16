@@ -10,6 +10,15 @@ from a row count, it leads the section in a blockquote.
 
 ## [Unreleased]
 
+### Added
+
+- **A README section on the container**, which the repo shipped and
+  documented nowhere. Measured rather than described: the image is 1.34 GB,
+  its entrypoint answers `--help`, a run inside it returns the same 70
+  markets a local browser does, and it carries no `.env`, no test suite and
+  no fixtures. CI has built it on every PR from the start; this is the first
+  time it was built and RUN by hand (§16).
+
 ## [0.1.1] — 2026-09-16
 
 An audit of v0.1.0 against the family's own checklist, done by MUTATION —

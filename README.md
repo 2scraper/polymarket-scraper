@@ -323,6 +323,29 @@ unsatisfiable pins, and pyppeteer and selenium collide on `urllib3`.
 
 ---
 
+## In a container
+
+```bash
+docker build -t polymarket-scraper .
+docker run --rm -v "$PWD/out:/out" polymarket-scraper \
+  --category crypto --out /out/crypto
+```
+
+Measured 2026-09-16: the image is **1.34 GB** (Chromium is most of it), its
+default entrypoint is `--help`, and a run inside it returned **the same 70
+markets** a local browser did on the same listing — so Chromium really does
+launch in there rather than the install layer merely exiting 0.
+
+It carries nine modules and two requirements files and nothing else: **no
+`.env`, no test suite, no fixtures, no sample output**. A `.env` baked into
+an image is a credential published to everyone who can pull it, so pass
+`--twocaptcha-key`/`--proxy` at run time or mount a `.env` at `/app/.env`.
+
+The container runs headless, which is also the default everywhere else here —
+headless and headful were measured identical on this site.
+
+---
+
 ## Flags
 
 ```
