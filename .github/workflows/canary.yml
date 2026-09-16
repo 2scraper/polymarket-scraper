@@ -1,0 +1,276 @@
+name: canary
+
+# One real run a day against polymarket.com, and the only workflow in this
+# repo that touches the site. tests.yml (deliberately) never does — see its
+# own header for why the two are separate.
+#
+# WHAT IT EXERCISES, and why these two runs
+# -----------------------------------------
+# This site ships two shapes of page and this repo reads them differently, so
+# a canary that only hit one would miss half of what it checks:
+#
+#   1. `--mode events` over a category listing, 4 pages — the listing itself
+#      plus three of the event pages it named. This is the ONLY multi-page
+#      path in the repo, and with a single page a dead page walk is invisible
+#      (§11). It also exercises the merge that replaces a shallow listing row
+#      with the deeper reading from its own event page, and the columns only
+#      an event page publishes: `condition_id`, `clob_token_ids`, `spread`.
+#
+#   2. `--mode markets` over `/predictions`, 1 page — the shallow path, the
+#      JSON-LD price confirmation, and the site's own `totalCount` beside the
+#      twenty events it actually renders.
+#
+# NO PROXY IS NEEDED, AND THAT IS MEASURED
+# ----------------------------------------
+# From a plain datacentre address on 2026-09-16: twelve browser captures and
+# three raw fetches, all HTTP 200, including `curl` announcing itself as
+# `curl/8.0` and as `python-requests/2.32` — byte-identical 791,003-byte
+# responses to both. This site does not read the client and did not
+# rate-limit an ordinary run, so a bare GitHub runner is a real test here
+# rather than a formality, and this canary does not skip.
+#
+# A POLYMARKET_PROXY secret is USED when one is set and is not required:
+#
+#     gh secret set POLYMARKET_PROXY --repo 2scraper/polymarket-scraper
+#
+# It goes through the ENVIRONMENT rather than a commented-out --proxy line,
+# because env_config.py already reads exactly that variable, a credential
+# must never reach a command line (§3), and an unset secret arrives as an
+# empty string which the loader treats as "not configured". One line is
+# correct with and without it.
+#
+# WHAT FAILS THE BADGE AND WHAT ONLY WARNS
+# ----------------------------------------
+# A block (exit 3) WARNS. Nothing refused this scraper while it was written,
+# so a refusal here says something about the runner's address rather than
+# about this code, and a check that is always red teaches everyone to ignore
+# checks. But a warning must not read as a pass: every warning path also
+# writes to the step summary saying in words that the canary did not test
+# anything today.
+#
+# Parsing zero rows from a page the site plainly served (exit 4), or a
+# coverage floor being missed, DOES fail — that is the regression this exists
+# to catch.
+
+on:
+  schedule:
+    # 06:20 UTC. Off the hour, because everything else in the world runs on
+    # it and a queued runner adds nothing but latency.
+    - cron: "20 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the client and Chromium
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-playwright.txt
+          playwright install --with-deps chromium
+
+      - name: Walk a listing and three of its event pages (the deep path)
+        id: deep
+        env:
+          POLYMARKET_PROXY: ${{ secrets.POLYMARKET_PROXY }}
+        # `set +e`: GitHub runs `run:` steps under `bash -e`, so a non-zero
+        # command aborts the step BEFORE the following echo, and
+        # continue-on-error does not change that — it stops the step failing
+        # the job, not the shell's errexit.
+        run: |
+          set +e
+          python3 playwright_scraper.py \
+            --url "https://polymarket.com/predictions/crypto" \
+            --mode events --pages 4 \
+            --delay 5 --retries 3 --retry-delay 10 --headless \
+            --out canary_events --format json \
+            --dump-html canary_events.html
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Interpret the deep-walk exit code
+        run: |
+          case "${{ steps.deep.outputs.exit_code }}" in
+            0) echo "::notice::Event walk complete." ;;
+            3)
+              echo "::warning::Blocked before parsing (exit 3) from a bare GitHub runner. Nothing refused this scraper from a datacentre address while it was written, so this says something about the runner rather than about this code — but it also means the site-side check did NOT happen today."
+              echo "A runner address was refused. The parser was not exercised. Set a \`POLYMARKET_PROXY\` secret to give this canary an exit whose request rate it controls; a block would then fail the job, which is the point." >> "$GITHUB_STEP_SUMMARY" ;;
+            4)
+              echo "::error::Ran fine and parsed 0 rows (exit 4) from a listing that normally holds twenty events and about seventy markets. The inlined payload (self.__next_f.push) or the tile markup has most likely moved — this is exactly the regression this canary exists to catch. The HTML dump in the artefacts tells you which."
+              exit 1 ;;
+            6)
+              echo "::warning::Partial run (exit 6). canary_events.meta.json carries the stop_reason and which pages failed." ;;
+            *)
+              echo "::error::Unexpected exit ${{ steps.deep.outputs.exit_code }}."
+              exit 1 ;;
+          esac
+
+      - name: Sanity-check the deep walk
+        if: steps.deep.outputs.exit_code == '0' || steps.deep.outputs.exit_code == '6'
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+
+          rows = json.loads(Path("canary_events.json").read_text())
+          meta = json.loads(Path("canary_events.meta.json").read_text())
+          fail = []
+
+          # THE PAGINATION CHECK. --mode events is the only multi-page path
+          # here, and a walk that quietly fetched one page and reported
+          # success is the family's most expensive bug (§7).
+          if meta["status"] == "complete" and meta["pages_completed"] < 4:
+              fail.append("status complete but only %d of 4 pages"
+                          % meta["pages_completed"])
+
+          # Floors, not exact figures: a listing's market count moves through
+          # the day as events resolve. Measured 70-94 markets on three
+          # listings; 30 leaves room for a quiet category.
+          if meta["pages_completed"] >= 1 and len(rows) < 30:
+              fail.append("only %d rows; a measured listing carried 70-94"
+                          % len(rows))
+
+          # The deep columns are the whole point of --mode events. Page 1
+          # publishes none of them, so a walk that fetched the event pages
+          # and did NOT come back with condition ids has read them wrongly.
+          deep = [r for r in rows if r.get("condition_id")]
+          if meta["pages_completed"] >= 2 and not deep:
+              fail.append("no row carries a condition_id after %d event "
+                          "page(s) — the event-page read has broken"
+                          % (meta["pages_completed"] - 1))
+          if any(len(r.get("clob_token_ids") or []) != 2 for r in deep):
+              fail.append("a deep row is missing its CLOB token id pair")
+
+          # Every market the payload names has a price, on every capture
+          # taken. A run where that stops being true is reading the wrong
+          # field rather than meeting an unusual listing.
+          priced = sum(1 for r in rows if r.get("price") is not None)
+          if priced < len(rows):
+              fail.append("%d of %d rows have no price"
+                          % (len(rows) - priced, len(rows)))
+
+          # Rows must come from the site's own payload. A run that fell back
+          # to the tiles still produces rows — event-level ones, with a
+          # rounded volume — and the count alone would not show it.
+          views = {r.get("data_source") for r in rows}
+          if views - {"flight", "flight+jsonld"}:
+              fail.append("rows came from %s, not from the payload alone"
+                          % sorted(views))
+
+          # `position` restarts at 1 on every page, so the column is
+          # worthless without `page` beside it — and a page number that was
+          # never threaded through is invisible to every other check (§18).
+          pairs = {(r.get("page"), r.get("position")) for r in rows}
+          if len(pairs) != len(rows):
+              fail.append("page+position is not unique across the run")
+
+          print("rows=%d pages=%d deep=%d status=%s views=%s"
+                % (len(rows), meta["pages_completed"], len(deep),
+                   meta["status"], sorted(views)))
+          if fail:
+              for f in fail:
+                  print("FAIL: " + f)
+              raise SystemExit(1)
+
+      - name: Scrape the popular listing (the shallow path)
+        id: listing
+        env:
+          POLYMARKET_PROXY: ${{ secrets.POLYMARKET_PROXY }}
+        run: |
+          set +e
+          python3 playwright_scraper.py \
+            --url "https://polymarket.com/predictions" \
+            --delay 5 --retries 3 --retry-delay 10 --headless \
+            --out canary_listing --format json \
+            --dump-html canary_listing.html
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Interpret the listing exit code
+        run: |
+          case "${{ steps.listing.outputs.exit_code }}" in
+            0) echo "::notice::Listing run complete." ;;
+            3)
+              echo "::warning::Blocked before parsing (exit 3) on the listing run."
+              echo "The listing run was refused; the shallow path was not exercised today." >> "$GITHUB_STEP_SUMMARY" ;;
+            4)
+              echo "::error::0 rows from /predictions, which renders twenty events. The payload read has broken."
+              exit 1 ;;
+            *)
+              echo "::error::Unexpected exit ${{ steps.listing.outputs.exit_code }}."
+              exit 1 ;;
+          esac
+
+      - name: Sanity-check the listing run
+        if: steps.listing.outputs.exit_code == '0'
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+
+          rows = json.loads(Path("canary_listing.json").read_text())
+          meta = json.loads(Path("canary_listing.meta.json").read_text())
+          fail = []
+
+          if meta["status"] != "complete":
+              fail.append("status is %r, not complete" % meta["status"])
+          if len(rows) < 30:
+              fail.append("only %d rows; /predictions carried 94 when "
+                          "measured" % len(rows))
+
+          # THE CLAIM THIS REPO IS BUILT ON: a listing renders twenty events
+          # and the site's own state says the catalogue holds thousands. If
+          # the first number grows, this site has started paginating and the
+          # README's central measurement needs redoing — which is worth a red
+          # badge and a look, not a silent pass.
+          events = len({r["event_slug"] for r in rows if r.get("event_slug")})
+          if events > 25:
+              fail.append("this listing rendered %d events, not the twenty "
+                          "this repo is documented around — re-measure the "
+                          "pagination claim" % events)
+          if not meta.get("total_events") or meta["total_events"] < 1000:
+              fail.append("the site's own totalCount came back as %r"
+                          % meta.get("total_events"))
+
+          # JSON-LD names one market per event, so this tops out near one in
+          # five on a listing. Zero means the structured-data path stopped
+          # being read, which is how the currency column goes null.
+          confirmed = sum(1 for r in rows
+                          if r.get("data_source") == "flight+jsonld")
+          if not confirmed:
+              fail.append("JSON-LD confirmed no prices at all")
+          if any(r.get("currency") != "USD" for r in rows):
+              fail.append("a row came back with a currency other than USD")
+
+          # A listing publishes none of the deep columns. If one appears
+          # here, the modes have stopped meaning what the README says.
+          if any(r.get("condition_id") for r in rows):
+              fail.append("a listing row carried a condition_id")
+
+          print("rows=%d events=%d total_events=%s confirmed=%d"
+                % (len(rows), events, meta.get("total_events"), confirmed))
+          if fail:
+              for f in fail:
+                  print("FAIL: " + f)
+              raise SystemExit(1)
+
+      - name: Upload what the run produced
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canary-artifacts
+          path: |
+            canary_*.json
+            canary_*.html
+            canary_*_debug.html
+            canary_*_debug.png
+          if-no-files-found: ignore
+          retention-days: 14
