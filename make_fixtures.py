@@ -102,6 +102,15 @@ SOURCES = {
                         "https://polymarket.com/event/"
                         "crypto-market-structure-legislation-becomes-law-in-2026"
                         "-20260727223933088", None),
+    # THE FIXTURE THE MARKER CHECKS ACTUALLY NEED. A page the site served in
+    # full, fetched over the 2Captcha Scraping Browser — so it carries that
+    # service's auto-solve extension injections as well as the site's own
+    # markup. Every other capture here comes from a local browser or curl,
+    # and a marker set is only tested against the way a real run fetches
+    # (§21: the check that should have caught this in a sibling repo passed
+    # for the wrong reason, because its only fixture was curl-fetched).
+    "cdp_extension":  ("cdp_scraping_browser.html",
+                       "https://polymarket.com/predictions/crypto", 5),
     "not_found":      ("notfound.html",
                        "https://polymarket.com/event/this-event-does-not-exist-zzz-9999",
                        None),
@@ -113,7 +122,7 @@ SOURCES = {
 # of them (§18: a marker that matches a good page is worse than no marker).
 GOOD_PAGES = ("listing", "listing_tag", "listing_search", "listing_dash",
               "listing_es", "event_multi", "event_single", "event_sports",
-              "event_es", "event_no_object")
+              "event_es", "event_no_object", "cdp_extension")
 
 
 # ---------------------------------------------------------------------------
@@ -222,6 +231,13 @@ def _strip_furniture(html):
     def keep_script(match):
         body = match.group(0)
         if "application/ld+json" in body or "self.__next_f.push" in body:
+            return body
+        # A browser EXTENSION's injected tag is kept too, and it is the whole
+        # reason the `cdp_extension` fixture exists: the marker checks are
+        # about markup that is NOT the site's, and a trim that dropped it
+        # would leave them asserting nothing (§18, §21). These tags carry a
+        # src and no body, so keeping them costs a few hundred bytes.
+        if "-extension://" in body:
             return body
         return ""
 

@@ -722,6 +722,64 @@ def test_markers_do_not_match_a_good_page():
     return ok
 
 
+def test_the_scraping_browser_injects_a_captcha_and_it_is_not_the_sites():
+    group("Whose captcha markup is it? (§18, §21)")
+    ok = True
+    # MEASURED ON THIS SITE, not inherited. The same URL, fetched twice
+    # within a minute on 2026-09-16:
+    #
+    #   straight from the site (curl, 779,085 bytes)   0 of everything below
+    #   over the Scraping Browser (740,876 bytes)      21 "captcha", 16
+    #                                                  extension scripts,
+    #                                                  1 cf-turnstile,
+    #                                                  1 <captcha-widgets>
+    #
+    # So every captcha string this project has ever seen on polymarket.com
+    # came from 2Captcha's own auto-solve extension, and none from the site.
+    page = fixture("cdp_extension")
+    ok &= check("the Scraping Browser fixture still carries its injections",
+                page.count("chrome-extension://") >= 10)
+    ok &= check("...including the Turnstile hunter's own attribute",
+                "cf-turnstile" in page)
+    ok &= check("...and the empty mount point it adds",
+                "<captcha-widgets>" in page)
+
+    # THE COUNTERFACTUAL, and the reason this fixture exists. `cf-turnstile`
+    # is the obvious marker for a Turnstile. With it in the set, THIS page —
+    # which the site served in full — would be reported as a challenge, and
+    # a run over --cdp-endpoint would exit 3 holding a complete listing.
+    flat = {m.lower() for markers in BOT_CHALLENGE_MARKERS.values()
+            for m in markers}
+    ok &= check("`cf-turnstile` is NOT in the marker set", "cf-turnstile" not in flat)
+    ok &= check("...and here is why: it IS on this good page",
+                "cf-turnstile" in page.lower())
+    ok &= check("...while the marker that does work is absent from it",
+                "challenges.cloudflare.com" not in page.lower())
+
+    # And the page reads as what it is.
+    ok &= check("the page classifies as content, not as a challenge",
+                detect_page_state(page, 200, URLS["cdp_extension"]) == "content")
+    ok &= check("...no vendor is detected on it",
+                detect_bot_challenge(page) is None)
+    ok &= check("...and its markets parse",
+                len(rows_of("cdp_extension")) >= 5)
+
+    # The site's own configuration, asked the way §18 asks it: not "did we
+    # meet a captcha" but "is one configured, and would we see it?" Counted
+    # with the extension's own scripts removed, so the answer is about
+    # polymarket.com rather than about our tooling.
+    import re as _re
+    site_only = _re.sub(r"<script[^>]+src=\"(?:chrome|moz)-extension://[^\"]*\"[^>]*>.*?</script>",
+                        " ", page, flags=_re.S | _re.I)
+    for label, pattern in (("a *_SITE_KEY", r"[A-Z_]*SITE_KEY"),
+                           ("a 6L… reCAPTCHA key", r"\b6L[A-Za-z0-9_-]{20,}"),
+                           ("a data-sitekey", r"data-sitekey"),
+                           ("a Turnstile loader", r"challenges\.cloudflare\.com")):
+        ok &= check(f"the site's own markup carries no {label}",
+                    not _re.search(pattern, site_only, _re.I))
+    return ok
+
+
 def test_the_solver_is_not_declared_useless():
     group("What may be said about a captcha here (§19)")
     ok = True
@@ -2496,6 +2554,7 @@ def main() -> int:
     ok &= test_pagination()
     ok &= test_page_state()
     ok &= test_markers_do_not_match_a_good_page()
+    ok &= test_the_scraping_browser_injects_a_captcha_and_it_is_not_the_sites()
     ok &= test_the_solver_is_not_declared_useless()
     ok &= test_page_flow_policy()
     ok &= test_scroll_loop()

@@ -284,10 +284,31 @@ none of them buys data you could not already get.
 
 ### Captchas
 
-**No challenge was met** while this repo was built: twelve browser captures
-and three raw fetches contained zero markers of any vendor, and zero captcha
-configuration — no `recaptcha`, `hcaptcha`, `turnstile`, `datadome`,
-`perimeterx` or `sitekey` anywhere.
+**No challenge was met, and none is configured.** The same URL fetched twice
+within a minute on 2026-09-16 settles who owns every captcha string this
+project has ever seen on the site:
+
+| | straight from the site (`curl`, 779,085 bytes) | over the Scraping Browser (740,876 bytes) |
+|---|---|---|
+| the word `captcha` | **0** | 21 |
+| `chrome-extension://` scripts | **0** | 16 |
+| `cf-turnstile` | **0** | 1 |
+| `<captcha-widgets>` mount | **0** | 1 |
+| `challenges.cloudflare.com` | **0** | **0** |
+| `data-sitekey`, `*_SITE_KEY`, a `6L…` key | **0** | **0** |
+
+Every one of them comes from 2Captcha's own auto-solve extension —
+`chrome-extension://kjmk…/content/captcha/{turnstile,recaptcha,arkoselabs,
+geetest,keycaptcha,lemin,yandex,amazon_waf}/…` — and none from polymarket.com.
+Across thirteen more captures (four page kinds, three locales, a 404 and a
+proxy-error page) the count is zero everywhere.
+
+**Which is exactly why `cf-turnstile` is not in this repo's marker set.** It
+is the obvious marker for a Turnstile, and on the page above it fires on a
+listing the site served in full — so a run over `--cdp-endpoint` would report
+exit 3 on 68 markets. `challenges.cloudflare.com` is the one that works: zero
+on every served page, including that one. The suite keeps a fixture of that
+exact page and asserts both halves.
 
 That is a statement about what happened, not about what is possible. The site
 sits behind Cloudflare (`server: cloudflare`, a `cf-ray` on every response),
