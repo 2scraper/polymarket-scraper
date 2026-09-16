@@ -400,6 +400,38 @@ def test_the_three_read_paths():
     return ok
 
 
+def test_the_page_number_is_threaded_through():
+    group("page + position, across MORE THAN ONE page (§18)")
+    ok = True
+    # §18's arithmetic bug, as a check. `position` restarts at 1 on every
+    # page, so without `page` beside it a row from page 2 claims a position
+    # another row already has — and on a sibling repo 60 of 119 rows did.
+    #
+    # It has to be asserted across TWO pages to mean anything: a check that
+    # only ever sees page 1 passes happily on a parser that hardcodes
+    # `page = 1`, which is exactly the defect. Proven by making that change
+    # and watching this fire.
+    page_one = rows_of("listing", page=1)
+    page_two = rows_of("listing", page=2)
+    ok &= check("both pages parsed", bool(page_one) and bool(page_two))
+    ok &= check("page 1 says it is page 1",
+                all(r.page == 1 for r in page_one))
+    ok &= check("page 2 says it is page 2",
+                all(r.page == 2 for r in page_two))
+    ok &= check("position restarts at 1 on each page",
+                page_one[0].position == 1 and page_two[0].position == 1)
+    pairs = {(r.page, r.position) for r in page_one + page_two}
+    ok &= check("...so page+position is unique across the two",
+                len(pairs) == len(page_one) + len(page_two))
+    # And the merge keeps them: a row that survived dedupe must still carry
+    # the page it came from, or the sidecar's per-page counts describe
+    # nothing.
+    merged, _new, _up = merge_pages([(1, page_one), (2, page_two)])
+    ok &= check("the merge does not flatten the page number",
+                {r.page for r in merged} == {1})
+    return ok
+
+
 def test_event_pages_are_scoped_to_their_event():
     group("An event page is scoped to ITS event, not to its rails")
     ok = True
@@ -2457,6 +2489,7 @@ def main() -> int:
     ok &= test_payload_decoding()
     ok &= test_values_on_real_fixtures()
     ok &= test_the_three_read_paths()
+    ok &= test_the_page_number_is_threaded_through()
     ok &= test_event_pages_are_scoped_to_their_event()
     ok &= test_unsupported_urls_are_refused()
     ok &= test_urls()
