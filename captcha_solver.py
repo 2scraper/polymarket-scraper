@@ -18,7 +18,16 @@ fetches taken on 2026-09-16 contained ZERO captcha markers of any vendor and
 zero captcha configuration: no `recaptcha`, `hcaptcha`, `turnstile`,
 `datadome`, `perimeterx`, `sitekey` or `*_SITE_KEY` anywhere in any of them.
 
-What that means is "no challenge was met", NOT "no challenge can be". The
+One piece of evidence pointed the other way and did not survive checking,
+which is worth recording because the next reader will find it too: the three
+scripts this repo replaced carried a hardcoded
+`SITE_KEY = "6LfMwpEp…"` — a reCAPTCHA site key, which is public by design
+and is not a credential. It appears NOWHERE on the site today: 0 occurrences
+across twelve captures, the homepage, and the `/login` and `/signup` routes
+(both of which 404 — signing in is a modal). So it was either stale or never
+measured, and it is not evidence that a challenge is configured (§13).
+
+What the absence means is "no challenge was met", NOT "no challenge can be". The
 site sits behind Cloudflare — `server: cloudflare` and a `cf-ray` header on
 every response — and a Cloudflare managed challenge renders a Turnstile,
 which 2Captcha solves with `TurnstileTaskProxyless`. The sentence this
