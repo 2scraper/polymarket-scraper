@@ -10,6 +10,65 @@ from a row count, it leads the section in a blockquote.
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-09-16
+
+An audit of v0.1.0 against the family's own checklist, done by MUTATION —
+breaking one thing at a time and watching whether the suite noticed — rather
+than by re-reading the code. Eight defects this family has shipped before
+were injected; six were caught immediately and two were not.
+
+> **Correction to v0.1.0's notes.** That section was edited after the tag was
+> cut, adding a paragraph about the credential-gated paths. A released
+> section is history — `git show v0.1.0:CHANGELOG.md` is what a reader can
+> check it against — so it has been restored verbatim and the paragraph moved
+> here, where it belongs (§19).
+
+### Fixed
+
+- **`diff_runs.py` compared columns that do not exist here.** It arrived
+  from a sibling tracking seven fields, not one of which is a column in this
+  repo's schema, so two runs diffed against each other would have reported
+  "no changes" for ever, on any input, while exiting 0. `TRACKED_FIELDS` now
+  names what a change IS on a prediction market — the price, the order book
+  around it, the volume windows, the state transitions that end a market's
+  life, and the question being re-worded — and the suite asserts every name
+  in it is a real column of `Market`.
+- **A `markets` run diffed against an `events` run reported a collapse that
+  never happened.** `volume_scope` moves between the two while `data_source`
+  stays `flight` on both, so `volume` went from the event's 199,000,000 to
+  the market's 19,000,000 and read as a change. `volume_scope` now decides
+  "which view" alongside `data_source`, and those rows land in
+  `source_changed` where they belong.
+- **A test that could not fail.** Deleting the event-scoping rule outright
+  left the suite green: `make_fixtures.py` had trimmed each event fixture
+  down to its own event's markets, so there were no rails left to leak.
+  The generator now keeps two of the rails' markets on purpose, and the same
+  mutation is caught by ten checks.
+- **`scraper_api_client.py` logged "Parsed 70 stor(ies)"** through a full
+  live run — a sibling's vocabulary surviving in a shipped file.
+
+### Added
+
+- **The vocabulary guard**, which is what caught the last of those: the
+  file-describes-another-site check now also bans the words a copied
+  paragraph keeps after the site's name has been swapped out — `stor(ies)`,
+  `claps`, `day archive`, `parse_posts`. Each was counted across the repo
+  before being banned, so a word that occurs legitimately here is not in the
+  list (§18).
+- **A check that every field `diff_runs.py` tracks is a real column**, which
+  is the check that would have caught the first defect above.
+
+### Measured, 2026-09-16
+
+- **every credential-gated path was run end to end** (§16), and all of them
+  return the same 70 markets a local browser does: the Scraper API at
+  $0.0005 for 766,857 bytes in 11s, the Scraping Browser over CDP, and a
+  fingerprint fetched and applied (user agent, locale `en-US`, timezone
+  `America/New_York`). The Fingerprint API's documented multi-tag example is
+  rejected with HTTP 400 and this repo's default is the single `Windows` tag
+  that works — the §17 defect that made `--fingerprint` inert in four
+  sibling repos is not present here.
+
 ## [0.1.0] — 2026-09-16
 
 The first release of this repo as a member of the 2scraper family. It
@@ -65,15 +124,7 @@ From one datacentre address in Finland, headless, no proxy and no key:
 - **a second address agrees.** The canary's first dispatch, on a bare GitHub
   runner with no proxy, returned 70 markets from 20 events on the `--mode
   events` walk and 92 from 20 on `/predictions` — the same twenty events per
-  listing from another continent;
-- **every credential-gated path was run end to end** (§16), and all of them
-  return the same 70 markets a local browser does: the Scraper API at
-  $0.0005 for 766,857 bytes in 11s, the Scraping Browser over CDP, and a
-  fingerprint fetched and applied (user agent, locale `en-US`, timezone
-  `America/New_York`). The Fingerprint API's documented multi-tag example is
-  rejected with HTTP 400 and this repo's default is the single `Windows` tag
-  that works — the §17 defect that made `--fingerprint` inert in four
-  sibling repos is not present here.
+  listing from another continent.
 
 ### Fixed during the rebuild
 
@@ -103,5 +154,6 @@ Each of these was found by running the thing rather than by reading it (§15):
 - An issue template described two other sites at once.
 - `scraper_api_client.py` imported a parser function that no longer exists.
 
-[Unreleased]: https://github.com/2scraper/polymarket-scraper/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/2scraper/polymarket-scraper/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/2scraper/polymarket-scraper/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/2scraper/polymarket-scraper/releases/tag/v0.1.0

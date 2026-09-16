@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "polymarket-scraper"
-version = "0.1.0"
+version = "0.1.1"
 description = "Polymarket prediction-market scraper: listings, categories, searches and event pages, with prices, order books, volumes and CLOB token ids."
 readme = "README.md"
 license = "MIT"
