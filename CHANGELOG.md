@@ -57,6 +57,11 @@ were injected; six were caught immediately and two were not.
   list (§18).
 - **A check that every field `diff_runs.py` tracks is a real column**, which
   is the check that would have caught the first defect above.
+- **A page+position check that spans TWO pages.** The existing one only ever
+  saw page 1, so it passed happily on a parser that hardcoded `page = 1` —
+  which is §18's arithmetic bug, where 60 of 119 rows silently claimed a
+  position another row already had. Proven by making that change and
+  watching the new check fire.
 
 ### Measured, 2026-09-16
 
