@@ -2144,7 +2144,15 @@ def test_no_file_describes_another_site():
                # column — rather than by this vocabulary sweep.
                ("diff_runs.py", "claps"),
                ("diff_runs.py", "reading_time_min"),
-               ("diff_runs.py", "upvotes")}
+               ("diff_runs.py", "upvotes"),
+               # The CHANGELOG entry that RECORDS the removal names what was
+               # removed, which is the whole value of the entry. Scoped to
+               # these four words: a site NAME in the CHANGELOG is still
+               # banned, and so is any other sibling vocabulary.
+               ("CHANGELOG.md", "stor(ies)"),
+               ("CHANGELOG.md", "claps"),
+               ("CHANGELOG.md", "day archive"),
+               ("CHANGELOG.md", "parse_posts")}
 
     checked = 0
     for path in sorted(pathlib.Path(REPO_ROOT).rglob("*")):
