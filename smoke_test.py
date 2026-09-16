@@ -2280,16 +2280,53 @@ def test_wording():
         "--antidetect": "removed",
         "ANTIDETECT_LOCAL_API": "removed",
     }
-    shipped = [n for n in os.listdir(REPO_ROOT)
-               if n.endswith((".py", ".md", ".txt", ".toml", ".yml", ".example"))]
-    for name in shipped:
-        if name == "smoke_test.py":
+    # THE WHOLE TREE, not just the top level. This scanned `os.listdir`
+    # until the day the repo went public, so `.github/` — the workflows, the
+    # issue templates and the repo-metadata file below — was never checked at
+    # all. Widened after the banned phrase turned up on a surface no check
+    # could see (§21).
+    shipped = [path for path in sorted(pathlib.Path(REPO_ROOT).rglob("*"))
+               if path.is_file()
+               and path.suffix in (".py", ".md", ".txt", ".toml", ".yml",
+                                   ".yaml", ".example")
+               and ".git" not in path.parts
+               and path.name != "fixtures_generated.json"]
+    for path in shipped:
+        name = str(path.relative_to(REPO_ROOT))
+        if path.name == "smoke_test.py":
             continue  # this file names them in order to ban them
-        text = open(os.path.join(REPO_ROOT, name), encoding="utf-8",
-                    errors="replace").read().lower()
+        text = path.read_text(encoding="utf-8", errors="replace").lower()
         for phrase, instead in banned.items():
             ok &= check(f"{name}: no {phrase!r} (write {instead!r})",
                         phrase.lower() not in text)
+
+    group("What the repo publishes about ITSELF (§2, §21)")
+    # A description, topics and a homepage are the first thing anyone reads
+    # and the one surface a file-scanning suite cannot reach. Keeping the
+    # intended values in a FILE is what puts them back in reach — the checks
+    # above have just scanned this one like any other.
+    meta_path = os.path.join(REPO_ROOT, ".github", "repo-metadata.yml")
+    ok &= check("the published metadata is kept in the repo",
+                os.path.exists(meta_path))
+    if os.path.exists(meta_path):
+        meta = open(meta_path, encoding="utf-8").read()
+        description = ""
+        for line in meta.splitlines():
+            if line.startswith("description: "):
+                description = line[len("description: "):].strip()
+        words = len(description.split())
+        ok &= check(f"...with a description of 15-25 words (it has {words})",
+                    15 <= words <= 25)
+        ok &= check("...naming the engines a reader chooses between",
+                    all(e in description for e in ("Playwright", "Selenium")))
+        ok &= check("...and the product by its right name",
+                    "Scraping Browser API" in description)
+        topics = [l.strip()[2:] for l in meta.splitlines()
+                  if l.strip().startswith("- ")]
+        ok &= check(f"...and 10-15 topics (it has {len(topics)})",
+                    10 <= len(topics) <= 15)
+        ok &= check("...the first of which names the site",
+                    topics and topics[0] == "polymarket")
 
     group("Removed flags stay removed — scoped to the ENGINES")
     # --country is banned on a scraper (it could disagree with the URL, and

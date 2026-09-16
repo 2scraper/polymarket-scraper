@@ -1,0 +1,52 @@
+# What this repository publishes ABOUT ITSELF, kept here so it can be checked.
+#
+# GitHub's description, topics and homepage are the first thing anyone reads,
+# and they are the one surface the offline suite could not see: it scans
+# FILES, and a description lives behind an API. That gap is not hypothetical.
+# This repo's description shipped carrying the very wording §12 bans for the
+# Scraping Browser API, copied out of the family template, and it was caught
+# by hand minutes before the repo went public rather than by any check. The
+# same wording reached other public repos in this family for the same reason.
+#
+# The phrase is not quoted here on purpose: the check that now scans this
+# file would fire on it, and an allowlist entry would blunt the guard on the
+# one file whose entire job is to be a clean published surface.
+#
+# So the intended values live here, where the suite's wording and
+# describes-another-site checks scan them like any other file, and the
+# command below is what applies them. If you change one, change it here
+# first.
+#
+#   gh repo edit 2scraper/polymarket-scraper \
+#     --description "$(sed -n 's/^description: //p' .github/repo-metadata.yml)" \
+#     --homepage "$(sed -n 's/^homepage: //p' .github/repo-metadata.yml)"
+#
+# And to see what is actually live, which is the only thing that counts:
+#
+#   gh repo view 2scraper/polymarket-scraper \
+#     --json description,homepageUrl,repositoryTopics
+
+description: Polymarket prediction-market scraper (Playwright, Selenium, pyppeteer, or the 2Captcha Scraping Browser API via CDP) — market prices, order books, CLOB token ids, captcha solving, proxies
+
+homepage: https://2captcha.com
+
+# 10-15 of them, chosen for what THIS site is scraped for rather than copied
+# from the template. `price-monitoring` earns its slot because a prediction
+# market IS a price; `betting-odds` and `trading-data` are what people
+# actually search this data by. A topic nobody would search for this site is
+# a wasted slot out of fifteen.
+topics:
+  - polymarket
+  - prediction-markets
+  - betting-odds
+  - trading-data
+  - web-scraping
+  - scraper
+  - price-monitoring
+  - playwright
+  - selenium
+  - puppeteer
+  - captcha-solver
+  - scraping-browser
+  - proxy
+  - fingerprints

@@ -12,6 +12,16 @@ from a row count, it leads the section in a blockquote.
 
 ### Added
 
+- **The repo is public**, and the published surfaces are now checkable. Its
+  GitHub description had shipped carrying the wording §12 bans for the
+  Scraping Browser API, straight out of the family template — caught by hand
+  minutes before publishing, because the suite scans FILES and a description
+  lives behind an API. `.github/repo-metadata.yml` now holds the intended
+  description, homepage and topics where the wording checks scan them, with
+  the command that applies them beside it, and `test_wording` scans the
+  whole tree instead of only the top level (which is why `.github/` had
+  never been checked at all).
+
 - **A fixture fetched over the Scraping Browser, and the census behind it.**
   Asked which captcha the site had, the honest answer needed a count rather
   than a re-reading of the code — and the count found that every captcha
