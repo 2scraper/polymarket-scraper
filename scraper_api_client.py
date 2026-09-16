@@ -8,34 +8,31 @@ engines use, so the rows and columns are identical.
 
 MEASURED 2026-09-16, $0.0005 A REQUEST
 -------------------------------------
-All four modes, one request each, no browser anywhere and no proxy:
+One request, no browser anywhere and no proxy:
 
-    --mode tag        HTTP 200,   361,092 bytes,   53 rows,  5.4s
-    --mode archive    HTTP 200, 2,305,814 bytes,  128 rows,  8.3s
-    --mode author     HTTP 200,   229,266 bytes,   10 rows, 59.5s
-    --mode post       HTTP 200,   219,654 bytes,    1 row,   6.8s
+    /predictions/crypto   HTTP 200, 766,857 bytes, 70 rows, 11.0s
 
-The rows are not merely present, they are IDENTICAL to what a local browser
-produced on the same URLs: the same 128 stories on the archive day with 100%
-coverage of claps, reading time, word count and language, the same 248 claps
-/ 15.54 minutes / 3,801 words on the same story, and the same
-18,352-character body in post mode.
+The rows are not merely present, they are IDENTICAL to what the three
+browser engines produced on that URL minutes earlier: the same 70 markets,
+the same 20 events, the same 19 prices confirmed by the page's own JSON-LD.
 
-So this is the cheapest complete path on this site, and the archive day is
-what it is best at — one request returns the whole 2.3 MB legacy payload,
-which is the richest thing this site publishes.
+That is the whole point of this path on this site. Polymarket ships its
+markets in the SERVED response — the inlined Next.js payload, before a pixel
+paints — so a fetch that never renders anything loses nothing, and this is
+the cheapest complete path here.
 
-WHAT IT CANNOT DO, and it costs nothing here
---------------------------------------------
-It returns the SERVED response rather than a rendered DOM, so it cannot
-scroll. On a tag feed that costs nothing: the feed does not extend from an
-ordinary address anyway. On an AUTHOR page it does cost something — the same
-page over the Scraping Browser (`--cdp-endpoint` on a browser engine) scrolls
-10 cards up to 60 and yields 55 rows against this path's 10.
+WHAT IT CANNOT DO, and what that costs
+--------------------------------------
+It returns the served response rather than a rendered DOM, so it cannot
+scroll and it cannot click. On this site that costs NOTHING on a listing:
+twelve scroll rounds were measured adding zero events, and the payload is
+already complete in the first response.
 
-So: reach for this for `--mode archive` and `--mode post`, where it is
-complete and cheapest; reach for a browser engine over `--cdp-endpoint` when
-you want an author page's whole output.
+What it cannot do is walk `--mode events` — that mode needs page 1's parsed
+rows to name pages 2..N, which is a browser engine's loop rather than a
+single fetch. Point a browser engine at it for depth; use this for a
+listing, for a scheduled price snapshot, or from a machine where installing
+a browser is not an option.
 
     python3 scraper_api_client.py \\
         --url "https://polymarket.com/predictions/crypto"
@@ -236,7 +233,7 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
             "The Scraper API returned a %s bot-challenge page (%d bytes), not real content.",
             vendor, len(html),
         )
-        logger.error("A challenge page is not a final answer — retry before concluding "
+        logger.error("A challenge page is not a final result — retry before concluding "
                      "anything (--retries). This site needs a rendered browser in the "
                      "path: pass --cdp-url, or use playwright_scraper.py / "
                      "puppeteer_scraper.py directly.")
@@ -244,13 +241,13 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
 
     mode = "markets" if page_kind(args.url) == "listing" else "event"
     products = parse_markets(html, args.url, mode=mode)
-    logger.info("Parsed %d stor(ies).", len(products))
+    logger.info("Parsed %d market(s).", len(products))
 
     if not products:
         dump = f"{args.out}_scraperapi_debug.html"
         with open(dump, "w", encoding="utf-8") as f:
             f.write(html)
-        logger.warning("0 stories parsed — saved the raw response to %s so "
+        logger.warning("0 markets parsed — saved the raw response to %s so "
                        "you can see what actually came back. This site "
                        "server-renders both of its payloads, so a served "
                        "page should never parse to zero here: check the dump "

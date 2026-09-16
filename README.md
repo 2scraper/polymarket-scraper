@@ -269,12 +269,18 @@ run.
 What a [2captcha](https://2captcha.com) key buys here is therefore **volume
 and geography, not access**:
 
-| product | what it is for here |
-|---|---|
-| **proxy** pool | many addresses instead of one, when you walk many listings |
-| **Scraping Browser API** | a remote browser over CDP: no local browser, and a chosen exit country (`--cdp-endpoint`) |
-| **Scraper API** | one HTTP request per page, no browser anywhere (`scraper_api_client.py`) |
-| **fingerprint** API | a consistent device identity across runs (`--fingerprint`) |
+| product | what it is for here | measured 2026-09-16 |
+|---|---|---|
+| **proxy** pool | many addresses instead of one, when you walk many listings | not needed to get in; `--delay` is the cheaper lever |
+| **Scraping Browser API** | a remote browser over CDP: no local browser, a chosen exit country (`--cdp-endpoint`) | **70 markets, identical to a local browser** |
+| **Scraper API** | one HTTP request per page, no browser anywhere (`scraper_api_client.py`) | **$0.0005, 766,857 bytes, 70 markets, 11s — identical rows** |
+| **fingerprint** API | a consistent device identity across runs (`--fingerprint`) | fetched, applied (UA, locale `en-US`, timezone `America/New_York`), 70 markets |
+
+Every one of those was run end to end against this site rather than assumed
+(CLAUDE.md §16: the credential-gated paths are the ones nobody runs). They
+all return **the same 70 markets** a local browser does, which is the useful
+finding: on this site the paid products buy convenience and geography, and
+none of them buys data you could not already get.
 
 ### Captchas
 
