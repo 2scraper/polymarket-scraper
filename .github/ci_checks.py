@@ -91,7 +91,7 @@ HEX32 = re.compile(r"\b[0-9a-f]{32}\b")
 # Contexts in which a 32-hex string is plainly not a key.
 #
 # Deliberately WITHOUT this site's asset hosts. Cloudflare's own challenge
-# script carries 32-hex session ids, and Medium's image ids reach similar
+# script carries 32-hex session ids, and this site's on-chain ids reach far
 # lengths — both would trip this check — so `make_fixtures.py` replaces every
 # 24+ character hex run in a committed fixture with a non-hex placeholder
 # before it is written, and the fixtures carry none. (The first version of
