@@ -1072,7 +1072,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
         logger.error("%s", page_flow.block_advice(
             html, headless=bool(getattr(args, "headless", False)),
             has_pool=has_pool))
-        outcome.blocked_by = vendor or ("no-response" if not html else "bot-or-not")
+        outcome.blocked_by = vendor or ("no-response" if not html else "not-served")
         outcome.final_url = session.page.url
         return outcome
 

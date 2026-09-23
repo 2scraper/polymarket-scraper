@@ -235,7 +235,7 @@ jobs:
   # python:3.12-slim, where the apt half is not a pip package and cannot ride
   # in requirements.txt. `chromium` rather than `chrome`, and unlike a
   # sibling repo that is not a compromise — this site was measured serving
-  # the bundled build the full feed.
+  # the bundled build the full page.
   docker:
     runs-on: ubuntu-latest
     steps:
