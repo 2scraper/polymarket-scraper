@@ -14,8 +14,8 @@ exactly like a passing run. CI's engine-smoke job installs each engine in its
 own venv and fails if that skip list is non-empty.
 
 The fixtures are cut from real captures by `make_fixtures.py`, which proves
-each one parses IDENTICALLY to its untrimmed original, column for column,
-and replaces every real author handle with a pseudonym. Do not hand-edit
+each one parses IDENTICALLY to its untrimmed original, column for column.
+Nothing in them is rewritten — see make_fixtures.py for why. Do not hand-edit
 them.
 
 WHAT THIS SUITE IS FOR, beyond the obvious
@@ -24,18 +24,18 @@ Most of these checks exist because of a specific failure, in this repo or in
 a sibling. The ones worth knowing about before you change anything:
 
   * `test_values_on_real_fixtures` asserts VALUES, not coverage. A column can
-    be 100% populated and entirely wrong. The one that matters here is
-    `claps`: Medium's legacy payload carries `virtuals.totalClapCount` AND
-    `virtuals.recommends` side by side, both populated on 128 of 128 stories,
-    and the second is the retired pre-2017 recommend count — 25 against 248
-    on the same story. Reading it would have filled the column completely and
-    wrongly, and no coverage check would have said a word.
+    be 100% populated and entirely wrong. The ones that matter here are
+    `price` (outcomePrices[0], index-aligned with `outcomes`, which are not
+    always Yes/No) and `volume`, which is the MARKET's exact figure on an
+    event page and the EVENT's on a listing — `volume_scope` says which, and
+    reading the wrong one fills the column completely and wrongly.
 
-  * `test_markers_do_not_match_a_good_page` is the §18 rule as a test. Medium
-    ships reCAPTCHA markup for its own sign-in widget on every page it
-    serves, and `challenge-platform` appears twice on good and refused pages
-    alike. A marker that matches every page is worse than no marker, so every
-    marker in every set is asserted ABSENT from four pages known to be good.
+  * `test_markers_do_not_match_a_good_page` is the §18 rule as a test. A
+    marker that matches every page is worse than no marker, so every marker
+    in every set is asserted ABSENT from every page known to be good — and
+    `cf-turnstile` is kept out of the set because 2Captcha's own auto-solve
+    extension injects it into a page fetched over the Scraping Browser
+    (the `cdp_extension` fixture).
 
   * `test_engine_parity` binds every shared-module call in every engine
     against the callee's REAL signature. Two engines in a sibling repo called
@@ -44,11 +44,6 @@ a sibling. The ones worth knowing about before you change anything:
     own first live run hit the same class twice — `scroll_until_settled` was
     called with a `target=` this module no longer takes, and Selenium passed
     `session.driver` to a helper that wanted `session`.
-
-  * `test_publication_pages_are_refused` pins the decision that keeps this
-    repo honest: a publication home page carries post IDS and no post data,
-    and rows built from it would hold a sku and 26 nulls while the run
-    reported success.
 """
 
 import ast
@@ -871,12 +866,11 @@ def test_page_flow_policy():
                 not page_flow.should_parse("empty") and not page_flow.should_retry("empty"))
     ok &= check("shell is parsed after the wait, never refetched",
                 page_flow.should_parse("shell") and not page_flow.should_retry("shell"))
-    # THE DIFFERENCE FROM EVERY SIBLING REPO, and it was found by running
-    # the thing (§15). A challenge is retried first; if the retries are spent
-    # and it is still a challenge, the run is BLOCKED (exit 3), not empty
-    # (exit 4). With this False the first live run parsed the 6 KB
-    # interstitial as a feed and reported "ran fine, found nothing" on a
-    # topic holding hundreds of answers.
+    # A challenge is retried first; if the retries are spent and it is still
+    # a challenge, the run is BLOCKED (exit 3), not empty (exit 4). With this
+    # False, a Cloudflare interstitial would be parsed as a listing and
+    # reported as "ran fine, found nothing" — the wrong verdict and the
+    # wrong advice.
     ok &= check("a challenge that survives its retries counts as blocked",
                 page_flow.counts_as_blocked("challenge") is True)
     ok &= check("but it is retried before that verdict is reached",
@@ -1655,16 +1649,16 @@ def test_driver_primitives_tolerate_a_navigation():
 def test_concurrency_machinery(skips):
     """§10: drive the worker pool with the browser stubbed out.
 
-    A live run cannot reach this. Page 1 is fetched alone and its answer
-    decides whether the rest may be addressed, so a blocked page 1 means the
-    workers never start — and on this site page 1 is blocked often enough
-    that a live test would pass by not running.
+    A live run cannot always reach this. Page 1 is fetched alone and its
+    answer decides whether the rest may be addressed, so a blocked page 1
+    means the workers never start and a live test would pass by not running.
 
-    The pool only exists in the Playwright engine (Selenium and pyppeteer
-    walk the days one at a time and say so), which is why this group targets
-    that engine alone.
+    The pool only exists in the Playwright engine, and only in --mode events,
+    where page 1 is the listing and pages 2..N are its event pages (Selenium
+    and pyppeteer walk them one at a time and say so), which is why this
+    group targets that engine alone.
     """
-    group("the archive worker pool, with no browser in it")
+    group("the event-page worker pool, with no browser in it")
     ok = True
     try:
         import playwright_scraper as eng
@@ -1715,7 +1709,7 @@ def test_concurrency_machinery(skips):
 
         eng.sync_playwright = _NoPlaywright
         try:
-            specs = [(n, "https://medium.com/tag/python/archive/2026/09/%02d" % n)
+            specs = [(n, "https://polymarket.com/event/test-event-%02d" % n)
                      for n in pages]
             return eng._fetch_pages_concurrently(_Args(), None, specs,
                                                  concurrency), seen
@@ -1735,7 +1729,7 @@ def test_concurrency_machinery(skips):
     #    hole the run would report as complete.
     (results, unattempted, exhausted), seen = _run(
         list(range(2, 10)), lambda n, u: good(n, u))
-    ok &= check("every queued day is fetched", sorted(seen) == list(range(2, 10)))
+    ok &= check("every queued event page is fetched", sorted(seen) == list(range(2, 10)))
     ok &= check("...exactly once", len(seen) == len(set(seen)))
     ok &= check("every fetch produced an outcome", len(results) == 8)
     ok &= check("nothing is left unattempted when all succeed", unattempted == [])
@@ -1750,18 +1744,18 @@ def test_concurrency_machinery(skips):
     ok &= check("...and each kept its own URL",
                 all(str(o.page_num).zfill(2) in o.url for o in ordered))
 
-    # 3. A day with no rows ends dispatch. Without this, asking for 40 days
-    #    of a tag that published on three fetches 37 empty ones.
+    # 3. A page with no rows ends dispatch. Without this, asking for 40
+    #    pages of a listing that holds three fetches 37 empty ones.
     def empty_after_4(page_num, url):
         return good(page_num, url, rows=0 if page_num >= 4 else 3)
 
     (results, unattempted, exhausted), seen = _run(
         list(range(2, 40)), empty_after_4, concurrency=2)
-    ok &= check("an empty day stops dispatch", exhausted)
+    ok &= check("an empty page stops dispatch", exhausted)
     ok &= check("...and most of the queue is never fetched", len(seen) < 12)
-    ok &= check("...with the unfetched days reported, not counted as failed",
+    ok &= check("...with the unfetched pages reported, not counted as failed",
                 len(unattempted) == 38 - len(seen))
-    ok &= check("unattempted days are page NUMBERS, in order",
+    ok &= check("unattempted pages are page NUMBERS, in order",
                 unattempted == sorted(unattempted))
 
     # 4. A worker that raises must not hang the run and must not take its
@@ -1909,13 +1903,13 @@ def test_engine_parity(skips):
     ok &= check("Selenium says there is nothing to choose",
                 "there is nothing to choose" in sel)
     pup = _engine_source("puppeteer_scraper") or ""
-    # The opposite of what a sibling repo asserts, and it is measured: this
-    # engine's OWN bundled Chromium is build 117.0.5938.0, the UA follows the
-    # browser's real version, and Medium refused it 3 times out of 3. The
-    # engine must say so in its docstring and in its block advice, because a
-    # reader who concludes "my address is burned" from that is going to buy a
-    # proxy they do not need.
-    ok &= check("pyppeteer names the Chromium build it is refused on",
+    # This engine's OWN bundled Chromium is build 117.0.5938.0 and the UA
+    # follows the browser's real version, so it announces `Chrome/117`. On a
+    # sibling site that build was refused; polymarket.com was measured
+    # serving it (README). The engine and the README both name the build and
+    # --chromium-path, so a reader who does meet a refusal knows the one
+    # thing that differs between this engine and its twins.
+    ok &= check("pyppeteer names the Chromium build it bundles",
                 "117.0.5938.0" in pup)
     ok &= check("...and tells the reader to pass --chromium-path",
                 "--chromium-path" in pup)
@@ -2165,8 +2159,8 @@ def test_no_file_describes_another_site():
     # an issue template about seller feedback scores. All four were copied in
     # with the family core and all four read as authoritative.
     #
-    # Nothing here can tell a paragraph about Medium from a paragraph about a
-    # rental site in general. What it CAN do is notice the vocabulary of the
+    # Nothing here can tell a paragraph about a sibling site from a paragraph
+    # about prediction markets in general. What it CAN do is notice the vocabulary of the
     # specific siblings this repo was copied from, which is where the real
     # leakage comes from.
     foreign = {

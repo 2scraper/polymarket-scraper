@@ -250,11 +250,11 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
             f.write(html)
         logger.error(
             "The site did not serve the Scraper API's request (upstream "
-            "HTTP %s, %d bytes) — saved to %s. Measured 2026-09-10: the "
-            "Scraper API's own exit is a datacentre address, and this site "
-            "answers those with NOTHING, while the same task routed through "
-            "a Scraping Browser session returned 200 and 417 KB. Pass "
-            "--cdp-url. This is exit 3, distinct from an empty result "
+            "HTTP %s, %d bytes) — saved to %s. All four modes were measured "
+            "returning HTTP 200 through this API on 2026-09-16, so check the "
+            "dump for Cloudflare's block page before concluding anything; "
+            "--cdp-url routes the task through a Scraping Browser session "
+            "instead. This is exit 3, distinct from an empty result "
             "(exit 4).", upstream_status, len(html), dump)
         return 3
 
@@ -297,10 +297,9 @@ def parse_args():
         description="Polymarket market scraper — 2captcha Scraper API edition "
                     "(no local browser). Measured 2026-09-16 at $0.0005 a "
                     "request: all four modes returned HTTP 200 and rows "
-                    "identical to a local browser's, including the whole "
-                    "2.3 MB archive-day payload in one request. It cannot "
-                    "scroll, which costs nothing except on an author page — "
-                    "see the module docstring.")
+                    "identical to a local browser's. It cannot walk "
+                    "--mode events, which needs a browser engine's page "
+                    "loop — see the module docstring.")
     # NOT required: prefer the TWOCAPTCHA_KEY env var. A key passed on the
     # command line is visible to anyone who can run `ps`, and it lands in
     # shell history and in any log that echoes the command line.
@@ -309,9 +308,7 @@ def parse_args():
                         "Defaults to $TWOCAPTCHA_KEY, which is the safer way to pass it.")
     p.add_argument("--url", default=None,
                    help="A Polymarket listing or event URL. "
-                        "returns nothing here — measured, and --wait-element "
-                        "does not help — because a topic's answers arrive "
-                        "over a later XHR. Required, unless POLYMARKET_URL is set "
+                        "Required, unless POLYMARKET_URL is set "
                         "in the environment or in .env.")
     p.add_argument("--category", default=None, help="Label to tag output rows with. Defaults to the category segment of the URL, so the column is never empty just because the flag was omitted.")
     p.add_argument("--format", choices=["json", "csv", "both"], default="both")

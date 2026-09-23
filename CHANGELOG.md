@@ -39,6 +39,44 @@ from a row count, it leads the section in a blockquote.
   no fixtures. CI has built it on every PR from the start; this is the first
   time it was built and RUN by hand (§16).
 
+### Fixed
+
+- **Donor-repo leftovers that described another site as this one.** The
+  family core arrived from sibling repos about a blogging site, a Q&A site
+  and a rental site, and some of their prose and runtime strings survived:
+  - user-visible: Selenium logged "No property cards appeared … this search"
+    and pyppeteer "No answer cards appeared … this feed"; both now say "No
+    event tiles … this listing", as Playwright already did. pyppeteer's block
+    advice claimed its bundled Chromium was "the build this site was
+    measured refusing" — false here, where it was measured served; it now
+    names the build and says so. The Scraper API client's block message
+    cited a sibling's 2026-09-10 datacentre refusal, its `--help`
+    description a sibling's archive payload and author pages, and its
+    `--url` help ended in a broken sentence about a topic's answers;
+  - the sidecar's `stop_reason` for an unrecognised refusal was
+    `blocked_bot-or-not`, a sibling's challenge-page name; it is now
+    `blocked_not-served`;
+  - `output_writer.run_meta` / `finish_run` defaulted `mode` to a sibling's
+    `"topic"`, which `diff_runs.py` would have refused as not one row per
+    sku. The engines always pass `--mode`, so no run was affected; the
+    default is now `"markets"`;
+  - `diff_runs.py`: its `--price-tolerance-pct` help and three comments
+    explained a sibling's live counters, per-story languages and missing
+    lifecycle, and its host-mismatch refusal said the site "serves one story
+    from several addresses". All now describe markets;
+  - `captcha_solver.py` said this site refuses a headless browser with a
+    394-byte "Access Denied" page. The README measures headless and headful
+    identical and no challenge met; the paragraph now says that;
+  - `smoke_test.py`: the docstring described a sibling's column, sign-in
+    widget and a test this repo does not have, and claimed the fixtures
+    pseudonymise author handles (`make_fixtures.py` rewrites nothing). The
+    worker-pool test fed a sibling's archive URLs and counted "days"; it now
+    uses event-page URLs, asserting the same behaviour;
+  - `.dockerignore` excluded a sibling's output prefix instead of this
+    repo's `polymarket_markets.*`; the bug-report template's "expected"
+    placeholder quoted a sibling's 96 products; `SECURITY.md` said the
+    project has no releases.
+
 ## [0.1.1] — 2026-09-16
 
 An audit of v0.1.0 against the family's own checklist, done by MUTATION —
