@@ -685,14 +685,15 @@ def _fetch_one_page(session, args, pool, page_num: int,
             debug_html)
         if not args.chromium_path and not args.cdp_endpoint:
             logger.error(
-                "This engine launched pyppeteer's OWN Chromium, which is the "
-                "build this site was measured refusing. Pass --chromium-path "
-                "pointing at an installed Chrome before concluding anything "
-                "about the address.")
+                "This engine launched pyppeteer's OWN Chromium (build "
+                "117.0.5938.0), the one thing that differs from its twins. "
+                "polymarket.com was measured serving it, but pass "
+                "--chromium-path pointing at an installed Chrome before "
+                "concluding anything about the address.")
         logger.error("%s", page_flow.block_advice(
             html, headless=bool(getattr(args, "headless", False)),
             has_pool=has_pool))
-        outcome.blocked_by = vendor or ("no-response" if not html else "bot-or-not")
+        outcome.blocked_by = vendor or ("no-response" if not html else "not-served")
         outcome.final_url = _current_url(session)
         return outcome
 
@@ -713,9 +714,10 @@ def _fetch_one_page(session, args, pool, page_num: int,
             content_timeout)
         _sleep(500)
         if found < threshold:
-            logger.info("No answer cards appeared within %.0fs. If this feed "
-                        "genuinely holds nothing, that is the expected "
-                        "answer and the run will report 0 rows (exit 4).",
+            logger.info("No event tiles appeared within %.0fs. If this "
+                        "listing genuinely holds nothing, that is the "
+                        "expected answer and the run will report 0 rows "
+                        "(exit 4).",
                         content_timeout / 1000)
         outcome.scroll = _scroll_the_feed(session, args, html, page_num)
         html = _content(session) or html

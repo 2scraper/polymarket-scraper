@@ -4,8 +4,8 @@ diff_runs.py
 -------------
 Compares two output files from this project (JSON, as written by
 output_writer.save) and reports what changed between them, keyed on `sku` —
-the identifier the README tells people to diff on for tracking an answer's
-reception over time.
+the identifier the README tells people to diff on for tracking a market's
+price, book and state over time.
 
     python3 diff_runs.py --old ml.2026-09-01.json \\
                           --new ml.2026-09-07.json
@@ -20,8 +20,8 @@ filename, diffed against the previous one:
 Four buckets, each keyed on sku — here the market's slug:
 
   added          — sku present in --new, absent from --old
-  removed        — sku present in --old, absent from --new (deleted or
-                   collapsed, or just off this particular feed run)
+  removed        — sku present in --old, absent from --new (closed or
+                   delisted, or just off this particular listing run)
   changed        — sku present in both, with a different price, order book,
                    volume, liquidity, state or question
   source_changed — sku present in both with a different value, but also a
@@ -48,11 +48,6 @@ from typing import Dict, List, Optional, Tuple
 
 from output_writer import UNIQUE_BY_SKU_MODES
 
-# What is worth watching on an answer. No price, currency, discount or stock
-# anywhere in this list, because this site has none of them — see
-# output_writer's docstring for why those columns do not exist on the row
-# either.
-#
 # `title` IS tracked, unusually for this family: it is the QUESTION, and
 # Polymarket lets a market be re-worded and re-slugged.
 # WHAT COUNTS AS A CHANGE ON THIS SITE, and why each of these and not more.
@@ -192,10 +187,9 @@ def diff_products(old: List[dict], new: List[dict],
         # THE TWO RUNS READ DIFFERENT VIEWS, which is not a change in the
         # answer — and on this site this is the bucket that matters most.
         #
-        # Upvotes, views, shares, comments and the question answer count come
-        # from the payload the view carried, which an archive or author page
-        # carries and a topic page does not. So a row read off a topic feed
-        # has no spread and carries its EVENT's volume, and the same market
+        # `spread`, the volume windows and the on-chain ids come from the
+        # payload the view carried, which an event page carries and a listing
+        # does not. So a row read off a listing has no spread and carries its EVENT's volume, and the same market
         # read off its own event page has a spread and the MARKET's volume.
         # Diffing the two would report every one of them as having appeared
         # from nowhere or collapsed by two orders of magnitude.
@@ -232,18 +226,16 @@ def diff_products(old: List[dict], new: List[dict],
             if not field_changes:
                 continue
 
-        # There is no lifecycle bucket on this site, and its absence is a
-        # measurement rather than an omission. A sibling repo needs one
-        # because an auction closing moves a bid kind and the amount beside
-        # it in one event; an answer has no such state machine. What it does
-        # have -- being deleted or collapsed -- makes it vanish from the
-        # feed, which is the `removed` bucket. The `lifecycle` key is still
-        # emitted, always empty, so a consumer written against the family
-        # diff shape does not have to branch.
+        # There is no separate lifecycle bucket here: a market's state
+        # transitions (`active`, `closed`, `accepting_orders`) are TRACKED
+        # fields, so a market closing lands in `changed` beside everything
+        # else about it. The `lifecycle` key is still emitted, always empty,
+        # so a consumer written against the family diff shape does not have
+        # to branch.
 
         # A counter ticking rather than a real move -- see
         # `_within_tolerance`. Only when the ONLY differences are count
-        # fields: a title or a body length changing alongside is a real
+        # fields: a title or an end date changing alongside is a real
         # change whatever the size of the move.
         if (all(f in COUNT_FIELDS for f in field_changes)
                 and _within_tolerance(before, after, field_changes,
@@ -374,14 +366,10 @@ def _check_comparable(args) -> bool:
     # consistently on a DIFFERENT single host, because then `added` and
     # `removed` would be describing the address rather than the catalogue.
     #
-    # There is deliberately no language check, and the reason is worth
-    # writing down because the sibling repo this file came from has one.
-    # There, `language` meant which of twenty-four language SITES a row came
-    # from, and those are different catalogues. Here it is the site's own
-    # `detectedLanguage` for the STORY — one measured English tag's day
-    # archive carried 123 `en` rows and 5 `id` ones — so refusing a pair
-    # whose languages differ would refuse two perfectly comparable runs of
-    # the same tag.
+    # There is deliberately no language check: a locale path translates the
+    # words and leaves the ids and the prices alone (the suite pins this on
+    # the /es/ fixtures), so two runs of one listing under different locales
+    # are still the same markets, joined on the same sku.
     sources = {}
     for label, path in (("--old", args.old), ("--new", args.new)):
         try:
@@ -394,7 +382,7 @@ def _check_comparable(args) -> bool:
     if len(set(sources.values())) > 1:
         problems.append(
             f"the two runs landed on different hosts ({sources}). This site "
-            f"serves one story from several addresses, so this is usually a "
+            f"serves every locale from one host, so this is usually a "
             f"different URL rather than a different catalogue — but added "
             f"and removed would describe the address change rather than "
             f"anything about the markets.")
@@ -428,11 +416,11 @@ def parse_args():
                         "counter ticking rather than an event: reported "
                         "separately and ignored by --fail-on-change. Default 0 "
                         "— report every tick. Unlike in most of this family "
-                        "the flag has a real use here: this site's own "
-                        "clap counts are live, so a monitor watching for an "
-                        "answer taking off wants a threshold, while one "
-                        "watching for an edit wants text_chars, which this "
-                        "never absorbs.")
+                        "the flag has a real use here: a market's price "
+                        "moves continuously, so a monitor watching for a "
+                        "real repricing wants a threshold, while one "
+                        "watching for a market closing wants `closed`, "
+                        "which this never absorbs.")
     p.add_argument("--fail-on-change", action="store_true",
                    help="Exit 1 if anything was added, removed or changed — "
                         "for a cron job that should only notify on a real diff.")
@@ -464,7 +452,7 @@ def main() -> int:
         print(f"[+] Full diff written to {args.out}")
 
     # Neither `source_changed` nor `within_tolerance` is a reason to fail.
-    # The first means our two runs read different views of the same answer;
+    # The first means our two runs read different views of the same market;
     # the second means a live counter ticked. Neither says anything about the
     # site, and alerting on either would train whoever reads the alert to
     # ignore it.
