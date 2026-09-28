@@ -707,7 +707,7 @@ def _fetch_one_page(session, args, pool, page_num: int,
         logger.error("%s", page_flow.block_advice(
             html, headless=bool(getattr(args, "headless", False)),
             has_pool=has_pool))
-        outcome.blocked_by = vendor or ("no-response" if not html else "bot-or-not")
+        outcome.blocked_by = vendor or ("no-response" if not html else "not-served")
         outcome.final_url = _current_url(session)
         return outcome
 
@@ -728,8 +728,8 @@ def _fetch_one_page(session, args, pool, page_num: int,
             content_timeout)
         _sleep(500)
         if found < threshold:
-            logger.info("No property cards appeared within %.0fs. If this "
-                        "search genuinely matches nothing, that is the "
+            logger.info("No event tiles appeared within %.0fs. If this "
+                        "listing genuinely holds nothing, that is the "
                         "expected answer and the run will report 0 rows "
                         "(exit 4).", content_timeout / 1000)
         outcome.scroll = _scroll_the_feed(session, args, html, page_num)

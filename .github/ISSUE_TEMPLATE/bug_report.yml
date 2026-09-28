@@ -108,7 +108,7 @@ body:
     attributes:
       label: What you expected instead
       placeholder: >-
-        96 products, as the README says a category page yields.
+        Twenty events per listing page, as the README measured (70-92 markets).
     validations:
       required: true
 

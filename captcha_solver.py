@@ -1138,16 +1138,11 @@ solve_recaptcha_v3 = solve_recaptcha
 # a JPEG of distorted text and a GET form). Roughly 190 lines of it, and none
 # of it is ported here, because this site has no such page.
 #
-# What this site does instead is refuse a HEADLESS browser. Measured
-# 2026-09-10 from five different addresses, four of them residential: one sibling's bot manager
-# answers with HTTP 403 and a 394-byte "Access Denied" page carrying a
-# reference id — no form, no image, no widget, nothing for a solver to
-# answer. And the trigger is the CLIENT rather than the address: the very
-# same addresses were served HTTP 200 and the full catalogue by a browser
-# with a real window. So the response to a block here is `--headful` or
-# `--cdp-endpoint`, not a solve and not a better proxy, and
-# product_parser.detect_page_state reports it as "blocked" rather than
-# "challenge" precisely so no solve is attempted and nothing is charged.
+# Nor does this site refuse a headless browser: headless and headful were
+# measured identical on polymarket.com, and no challenge was met in any
+# capture (README). What a block would look like here is Cloudflare's — the
+# site sits behind it — and a managed challenge renders a Turnstile, which
+# the machinery above does implement.
 #
 # The reCAPTCHA / hCaptcha / Turnstile machinery above IS kept, and that is a
 # deliberate asymmetry rather than an inconsistency. Detection stays broad
@@ -1155,6 +1150,6 @@ solve_recaptcha_v3 = solve_recaptcha
 # what the address has been doing — a narrow list is how a challenge gets
 # reported as an empty page months later. A solver for a challenge this site
 # has never been observed to serve is dead code; a DETECTOR for one is cheap
-# insurance: a detection that fires on a page whose lots have
+# insurance: a detection that fires on a page whose events have
 # already rendered guards nothing, which is why the default is
-# `when-blocked` and why it counts lot links before it spends.
+# `when-blocked` and why it counts event links before it spends.
