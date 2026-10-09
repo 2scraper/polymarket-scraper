@@ -12,6 +12,42 @@ from a row count, it leads the section in a blockquote.
 
 ### Fixed
 
+- **An interrupted write destroyed the previous good run's output.** The
+  audit's second finding, and real. `open(path, "w")` truncates before a
+  single byte is written, so a crash, a kill or a full disk partway through
+  `json.dump` left a SHORTER file where a complete one had been. Measured
+  here before the fix: a 204,292-byte `out.json` came back **28 bytes and
+  invalid JSON**.
+
+  That breaks the same promise `save` keeps when it refuses to overwrite
+  good output with an empty result — by a different route, with the previous
+  run destroyed by the ATTEMPT to replace it rather than by its outcome. The
+  sidecar is the part that matters most and the part the audit did not
+  mention: `<out>.meta.json` is the file a consumer branches on, so a
+  truncated one beside good rows reads as a broken run over data that is
+  fine.
+
+  All three writers now go through one `_atomic` helper — a temporary file
+  in the TARGET's own directory (`os.replace` is atomic only within one
+  filesystem), `flush` + `fsync` before the rename, and the temp file
+  unlinked on any exception including `KeyboardInterrupt`.
+
+  Lifted from a sibling rather than written here, because the one part that
+  is easy to get wrong was got wrong across the family: `NamedTemporaryFile`
+  creates its file `0600` and a rename keeps that, so an output nobody else
+  can read is the default. Measured 2026-10-09 by CALLING each sibling's
+  writer and stat-ing the file it produced — **8 of 11 leave their output
+  0600**, one hardcodes `0644`, and two derive the mode from the umask. This
+  takes the third kind: a new file gets what `open()` would have given it,
+  and a target somebody tightened deliberately keeps its own mode.
+
+  `newline=""` is threaded through for the CSV, or the csv module doubles
+  the carriage return on every row.
+
+  Checked with its own control: the suite asserts that a truncating writer
+  really does destroy the file before asserting that this one does not, so
+  "the file survived" cannot be a property of the test.
+
 - **`--mode events` stopped at the first event page with no markets and
   reported the run as `complete`.** Found by a third-party audit of 8
   October and real. Reproduced against `main` end to end: one empty page at

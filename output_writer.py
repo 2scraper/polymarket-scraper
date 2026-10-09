@@ -64,8 +64,12 @@ join on `condition_id` (event mode) or `market_id`. That sentence is in the
 README too, because a reader who joins on `sku` across a re-slug gets two
 rows and no warning.
 """
+import contextlib
 import csv
 import json
+import os
+import stat
+import tempfile
 from dataclasses import dataclass, asdict, field, fields
 from datetime import datetime, timezone
 from typing import Optional, List, Set, Sequence, Any, Type
@@ -330,8 +334,68 @@ def _csv_value(v: Any) -> Any:
     return v
 
 
+@contextlib.contextmanager
+def _atomic(path: str, newline: Optional[str] = None):
+    """Write to a temporary file beside `path`, then rename over it.
+
+    LIFTED from a sibling repo rather than written here. This is an
+    un-propagated family fix, not a design question, and the one part of it
+    that is easy to get wrong was got wrong in eight sibling repos — see the
+    mode note below. Measured across the family on 2026-10-09 by CALLING
+    each sibling's writer and stat-ing the file it produced: 8 of 11 atomic
+    implementations leave their output 0600, one hardcodes 0644, and two
+    derive it from the umask. This is one of the two.
+
+    Plain truncating `open` empties the file before a single byte is
+    written, so a crash, a kill or a full disk halfway through `json.dump`
+    leaves a SHORTER file where a complete one was. That breaks the promise
+    `save` keeps when it refuses to overwrite good output with an empty
+    result, by a different route: the previous good run is destroyed by the
+    ATTEMPT to replace it rather than by its outcome.
+
+    The sidecar matters most, and the audit that raised this did not mention
+    it: `<out>.meta.json` is the file a consumer branches on, so a truncated
+    one beside good rows reads as a broken run over data that is fine.
+
+    The temporary file goes in the SAME directory on purpose: `os.replace`
+    is atomic only within one filesystem, and a temp file under /tmp can be
+    on another one, where the rename degrades to an interruptible copy.
+    `fsync` before the rename makes the content durable, not merely visible.
+
+    `NamedTemporaryFile` creates the file 0600 and a rename keeps that, so
+    the mode is set explicitly: an existing target keeps its own (someone
+    may have tightened it deliberately), and a new one gets what `open()`
+    would have given it. A flat 0644 would be wrong in both directions.
+    """
+    directory = os.path.dirname(os.path.abspath(path)) or "."
+    handle = tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", newline=newline, dir=directory,
+        prefix=os.path.basename(path) + ".", suffix=".tmp", delete=False)
+    try:
+        with handle:
+            yield handle
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            mode = stat.S_IMODE(os.stat(path).st_mode)
+        except OSError:
+            umask = os.umask(0)
+            os.umask(umask)
+            mode = 0o666 & ~umask
+        os.chmod(handle.name, mode)
+        os.replace(handle.name, path)
+    except BaseException:
+        # Including KeyboardInterrupt and SystemExit: an interrupted run must
+        # not leave a stray .tmp beside the output it did not replace.
+        try:
+            os.unlink(handle.name)
+        except OSError:
+            pass
+        raise
+
+
 def write_json(rows: Sequence[Any], path: str) -> None:
-    with open(path, "w", encoding="utf-8") as f:
+    with _atomic(path) as f:
         json.dump([asdict(r) for r in rows], f, ensure_ascii=False, indent=2)
 
 
@@ -344,7 +408,7 @@ def write_csv(rows: Sequence[Any], path: str, row_cls: Type = Product) -> None:
     # The header comes from `row_cls`, not from the first row, so an empty
     # run still writes the columns of the mode that produced it.
     fieldnames = [f.name for f in fields(row_cls)]
-    with open(path, "w", encoding="utf-8", newline="") as f:
+    with _atomic(path, newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for r in rows:
@@ -433,7 +497,7 @@ def write_run_meta(out_prefix: str, meta: dict) -> str:
     both complete, and between runs of different `mode`.
     """
     path = f"{out_prefix}.meta.json"
-    with open(path, "w", encoding="utf-8") as f:
+    with _atomic(path) as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
     print(f"[+] Wrote run metadata -> {path} (status={meta.get('status')})")
     return path
