@@ -111,6 +111,23 @@ SOURCES = {
     # for the wrong reason, because its only fixture was curl-fetched).
     "cdp_extension":  ("cdp_scraping_browser.html",
                        "https://polymarket.com/predictions/crypto", 5),
+    # THE FIXTURE THE CLASSIFIER ACTUALLY NEEDS, for the same reason the one
+    # above is the one the marker checks need: every other event capture here
+    # is a browser's `page.content()`, and a browser serialises the rendered
+    # markup FIRST. The bytes the server sends interleave the inlined payload
+    # much earlier, which is what `scraper_api_client.py` and any HTTP client
+    # reads — a different document shape from the same URL.
+    #
+    # Measured 2026-10-09 on this very page: Next.js inlines its 404
+    # TEMPLATE at offset 134,033 in the served bytes and at 511,547 in the
+    # browser's DOM. The not-found check scanned the first 200,000, so it
+    # matched a template on a page holding five markets, classified it
+    # `empty`, and `empty` carries `parse: False` — every row discarded, on
+    # 12 of the 20 event pages `/predictions` named that day. Eleven browser
+    # captures could not show it and did not.
+    "event_served_bytes": ("event_served_bytes.html",
+                           "https://polymarket.com/event/"
+                           "fed-decision-in-october-20260617190323537", None),
     "not_found":      ("notfound.html",
                        "https://polymarket.com/event/this-event-does-not-exist-zzz-9999",
                        None),
@@ -374,6 +391,36 @@ def _payload_window(payload, keep_skus, keep_foreign=0):
     totals = re.search(r'"totalCount"\s*:\s*\d+\s*,\s*"hasNextPage"\s*:\s*\w+', payload)
     if totals:
         body = body + "," + totals.group(0)
+
+    # CARRIED OVER ON PURPOSE, and for the same reason `keep_foreign` keeps
+    # the rails: without it the check cannot fail.
+    #
+    # Next.js inlines its 404 TEMPLATE — a `"notfound":[…]` branch the router
+    # would render if the route had 404'd — into the payload of every page
+    # the site serves. It is data about a page that was NOT rendered, and the
+    # classifier used to match its wording and call a healthy event page
+    # `empty`, discarding every row. Trim the template away and no fixture
+    # can ever exercise that again, so the check guarding it would assert
+    # something no fixture contains.
+    #
+    # Kept as the literal branch rather than reconstructed, so the fixture
+    # carries the site's own bytes.
+    # The page ships SEVERAL `"notFound"` keys and only one of them is the
+    # rendered template: the others are a component reference or the literal
+    # "$undefined". Take the first whose own text carries the wording, since
+    # that is the branch the classifier used to match — picking the first key
+    # found gave a browser capture the component reference, and the fixture
+    # then held no template at all.
+    for notfound in re.finditer(r'"notFound"\s*:\s*\[', payload):
+        start = payload.index("[", notfound.end() - 1)
+        try:
+            _branch, end = _DECODER.raw_decode(payload, start)
+        except ValueError:
+            continue
+        if "could not be found" not in payload[start:end]:
+            continue
+        body = body + "," + payload[notfound.start():end]
+        break
     return body
 
 

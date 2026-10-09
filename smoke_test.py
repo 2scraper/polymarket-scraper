@@ -89,6 +89,40 @@ from product_parser import (parse_markets, SELECTORS, HOSTS, LOCALES,
 from proxy_pool import ProxyPool, mask, to_playwright, split_credentials
 
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+# A directory holding `pyvenv.cfg` is a virtualenv, whatever it is called.
+#
+# Structural, not by name, and that distinction is the whole value: the name
+# is what churns and the marker file is the contract (the same reasoning that
+# anchors a parser on a URL pattern rather than a CSS class, applied to a
+# directory). `.github/ci_checks.py` already had this; the tree-wide scanners
+# in THIS file did not, and the one that skipped `.venv` and `venv` by name
+# walked straight into a virtualenv called `.venv-pw` and reported that pip's
+# vendored `charset_normalizer` "describes this site".
+#
+# Correct about the file and useless to the reader — and it is what a new
+# user sees from their first `python3 smoke_test.py`, since the README tells
+# them to make a virtualenv per engine and says nothing about where. A guard
+# people have to argue with on their first command is one they learn to
+# suppress.
+_VENV_CACHE = {}
+
+
+def _in_virtualenv(path):
+    """Whether `path` sits inside a virtualenv anywhere under the repo."""
+    for parent in pathlib.Path(path).parents:
+        cached = _VENV_CACHE.get(parent)
+        if cached is None:
+            try:
+                cached = (parent / "pyvenv.cfg").is_file()
+            except OSError:
+                cached = False
+            _VENV_CACHE[parent] = cached
+        if cached:
+            return True
+        if str(parent) == REPO_ROOT:
+            break
+    return False
 ENGINES = ("playwright_scraper", "selenium_scraper", "puppeteer_scraper")
 SHARED_MODULES = {"page_flow": page_flow, "product_parser": product_parser}
 
@@ -648,6 +682,40 @@ def test_page_state():
     ok &= check("...and does not count towards exit 3",
                 page_flow.counts_as_blocked("empty") is False)
 
+    # THE 404 TEMPLATE EVERY SERVED PAGE CARRIES, and the reason the two
+    # text markers that used to live in `looks_not_found` are gone.
+    #
+    # Next.js inlines its not-found template — the wording and all — into the
+    # payload of every page the site serves. Matching that wording classified
+    # a healthy event page as `empty`, and `empty` carries `parse: False`, so
+    # every row was discarded while the run reported success. Measured
+    # 2026-10-09 over the twenty event pages `/predictions` named: the
+    # template was within the scanned window on 17 of 20, and 12 of 20 held
+    # markets and were thrown away. The remaining fixtures could not show it,
+    # because all of them are a BROWSER's `page.content()`, which serialises
+    # the rendered markup first and pushes the template past the window —
+    # `event_served_bytes` is the bytes the server actually sends, which is
+    # what scraper_api_client.py reads.
+    served_bytes = fixture("event_served_bytes")
+    ok &= check("the served-bytes fixture really does carry the 404 template",
+                served_bytes.lower().count("this page could not be found") >= 1)
+    ok &= check("...and it is still `content`, because it names markets",
+                detect_page_state(served_bytes, 200,
+                                  URLS["event_served_bytes"]) == "content")
+    ok &= check("...and its rows survive, rather than being discarded",
+                len(parse_markets(served_bytes,
+                                  URLS["event_served_bytes"])) == 5)
+    ok &= check("no text marker decides not-found — only an explicit 404",
+                looks_not_found(served_bytes, 200) is False
+                and looks_not_found(served_bytes, 404) is True)
+
+    # The ORDER is what made that mistake able to cost anything: the signal
+    # that PROVES the page is good was consulted second, behind a weaker one.
+    # Pinned so a future edit that reorders them is a decision.
+    ok &= check("a page naming markets is content even under a 404 status",
+                detect_page_state(served_bytes, 404,
+                                  URLS["event_served_bytes"]) == "content")
+
     # CHROMIUM'S OWN ERROR PAGE, captured through a dead proxy. It carries
     # `<title>polymarket.com</title>` — the SITE'S OWN HOSTNAME — no vendor
     # marker of any kind, and ERR_PROXY_CONNECTION_FAILED in a div that no
@@ -805,6 +873,8 @@ def test_the_solver_is_not_declared_useless():
         if path.is_dir() or path.suffix not in (".py", ".md", ".yml", ".txt"):
             continue
         if ".git" in path.parts or "fixtures_generated" in path.name:
+            continue
+        if _in_virtualenv(path):
             continue
         if path.name == "smoke_test.py":
             # This file holds the banned list itself. Skipping it is not a
@@ -1096,8 +1166,15 @@ def test_output_contract():
 
     group("Complete stop reasons")
     ok &= check("`completed` is complete", "completed" in COMPLETE_STOP_REASONS)
-    ok &= check("`no_new_products` is complete — the data-side condition",
-                "no_new_products" in COMPLETE_STOP_REASONS)
+    # This check used to assert the OPPOSITE, and it was the position the
+    # engines held: `no_new_products` was complete, as "the data-side
+    # condition". There is no data-side condition to have in `--mode events`
+    # — the walk is a finite list of event URLs page 1 named — and treating
+    # an empty event page as the end of it reported a run that fetched 4 of
+    # 21 pages as `complete`. Pinned in the new direction so reintroducing
+    # the reason is a decision rather than a regression.
+    ok &= check("`no_new_products` is NOT a complete stop reason",
+                "no_new_products" not in COMPLETE_STOP_REASONS)
     ok &= check("one page of a one-page listing is complete",
                 "listing_has_one_page" in COMPLETE_STOP_REASONS)
     ok &= check("a refused batch is NOT a complete stop reason",
@@ -1187,8 +1264,8 @@ def test_writers_and_finish_run():
         ok &= check("a REFUSED batch is partial, exit 6",
                     code == EXIT_PARTIAL and meta["status"] == "partial")
         code, meta = run(rows, "no_new_products")
-        ok &= check("a feed that added nothing new is complete, exit 0",
-                    code == 0 and meta["status"] == "complete")
+        ok &= check("a walk that stopped on an empty page is PARTIAL, exit 6",
+                    code == EXIT_PARTIAL and meta["status"] == "partial")
         code, meta = run(rows, "pagination_exhausted")
         ok &= check("a feed that ran out is complete, exit 0",
                     code == 0 and meta["status"] == "complete")
@@ -1744,19 +1821,43 @@ def test_concurrency_machinery(skips):
     ok &= check("...and each kept its own URL",
                 all(str(o.page_num).zfill(2) in o.url for o in ordered))
 
-    # 3. A page with no rows ends dispatch. Without this, asking for 40
-    #    pages of a listing that holds three fetches 37 empty ones.
-    def empty_after_4(page_num, url):
-        return good(page_num, url, rows=0 if page_num >= 4 else 3)
+    # 3. A page with no rows does NOT end dispatch, and this check used to
+    #    assert the reverse — "an empty page stops dispatch", justified by
+    #    "asking for 40 pages of a listing that holds three fetches 37 empty
+    #    ones". That justification is a sibling repo's, where pages are
+    #    consecutive days and page N+1 is a guess. Here every spec is an
+    #    event URL that page 1 NAMED, the queue is capped at `--pages - 1`,
+    #    and the engine logs how long the walk really is before starting it.
+    #    So the saving did not exist and the cost did: one empty page at
+    #    position 4 left 17 of 20 event pages unfetched, under
+    #    `status: complete` and exit 0.
+    def empty_at_4(page_num, url):
+        return good(page_num, url, rows=0 if page_num == 4 else 3)
 
     (results, unattempted, exhausted), seen = _run(
-        list(range(2, 40)), empty_after_4, concurrency=2)
-    ok &= check("an empty page stops dispatch", exhausted)
-    ok &= check("...and most of the queue is never fetched", len(seen) < 12)
-    ok &= check("...with the unfetched pages reported, not counted as failed",
-                len(unattempted) == 38 - len(seen))
-    ok &= check("unattempted pages are page NUMBERS, in order",
-                unattempted == sorted(unattempted))
+        list(range(2, 22)), empty_at_4, concurrency=2)
+    ok &= check("an empty event page does not stop dispatch", not exhausted)
+    ok &= check("...so every planned event page is still fetched",
+                sorted(seen) == list(range(2, 22)))
+    ok &= check("...and none is left unattempted", unattempted == [])
+    ok &= check("...while the empty page still comes back as an outcome",
+                any(o.page_num == 4 and not o.products for o in results))
+
+    # A page that FAILS is a different thing from a page that is empty, and
+    # the two must not be conflated: the first is a hole in the data, the
+    # second is a fact about that event.
+    def fail_at_4(page_num, url):
+        o = good(page_num, url)
+        if page_num == 4:
+            o.products, o.load_failed = [], True
+        return o
+
+    (results, unattempted, exhausted), seen = _run(
+        list(range(2, 12)), fail_at_4, concurrency=2)
+    ok &= check("a failed page is not reported as ok",
+                any(o.page_num == 4 and not o.ok for o in results))
+    ok &= check("...and does not stop the other event pages either",
+                sorted(seen) == list(range(2, 12)))
 
     # 4. A worker that raises must not hang the run and must not take its
     #    siblings' pages with it. This is the one that would otherwise be
@@ -1976,6 +2077,82 @@ def test_module_attributes_exist(skips):
     return ok
 
 
+def test_virtualenvs_in_the_tree_are_ignored():
+    group("A virtualenv in the working tree is gitignored, whatever its name")
+    import subprocess
+    ok = True
+    # The glob half of this lives in .gitignore and can always be out-named;
+    # this is the half that cannot. Any directory holding `pyvenv.cfg` IS a
+    # virtualenv, and an unignored one is a `git add -A` away from being
+    # committed — which is how this repo's own `.venv-pw` sat untracked and
+    # unignored while the file listed `.venv`, `venv` and `env`.
+    #
+    # Scanning what is THERE rather than asserting patterns, so a venv under
+    # a name nobody predicted still fails. On a clean checkout there is
+    # nothing to find and the check says so rather than passing silently
+    # (a check that starts passing once its input disappears is the failure
+    # mode this suite keeps meeting).
+    found = []
+    for cfg in pathlib.Path(REPO_ROOT).rglob("pyvenv.cfg"):
+        if ".git" in cfg.parts:
+            continue
+        found.append(cfg.parent)
+    if not found:
+        return check("no virtualenv in the tree to check (nothing to report)",
+                     True)
+    for venv in found:
+        rel = venv.relative_to(REPO_ROOT)
+        result = subprocess.run(
+            ["git", "check-ignore", "-q", str(rel)],
+            cwd=REPO_ROOT, capture_output=True)
+        ok &= check("the virtualenv %s/ is gitignored" % rel,
+                    result.returncode == 0)
+    return ok
+
+
+def test_tree_scanners_skip_virtualenvs():
+    group("Every tree-wide scanner skips a virtualenv (structurally)")
+    ok = True
+    # Pinned as WIRING rather than by content, because the three scanners
+    # fail in three different ways and only one of them fails loudly:
+    #
+    #   describes-this-site   flags pip's vendored code -> false FAILURE
+    #   dead-name corpus      adopts it as a reader     -> false PASS
+    #   banned wording        nothing in a venv matches -> no effect today
+    #
+    # Only the first is visible from a planted fault, so a control on the
+    # other two stays green and proves nothing. Asserting that each scanner
+    # carries the guard is what makes all of them a decision.
+    source = open(os.path.join(REPO_ROOT, "smoke_test.py"),
+                  encoding="utf-8").read()
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        body = ast.get_source_segment(source, node) or ""
+        if "rglob(" not in body:
+            continue
+        if "pyvenv.cfg" in body:
+            # A scanner whose JOB is to find virtualenvs must walk into
+            # them. Exempted by what it looks for rather than by name, so
+            # the exemption cannot be claimed by a scanner that merely
+            # mentions one.
+            continue
+        ok &= check("%s() walks the tree and skips virtualenvs" % node.name,
+                    "_in_virtualenv" in body)
+        # ASSEMBLED, not written out: this function is itself scanned by
+        # the loop above, so spelling the names here would make the check
+        # fail on its own body. Same reason the banned-wording check builds
+        # its phrases from pieces rather than exempting the file that holds
+        # them — the file most likely to acquire a stray one is the one
+        # nobody scans.
+        name = "ven" + "v"
+        by_name = ['"' + part + '"' for part in ("." + name, name)]
+        ok &= check("...and does not skip them by NAME, which is what broke",
+                    not any(n in body for n in by_name))
+    return ok
+
+
 def test_no_dead_public_names():
     group("Every public name in the policy modules has a reader (§17)")
     ok = True
@@ -1999,8 +2176,13 @@ def test_no_dead_public_names():
         # how this check first "found" 91 dead names in a healthy module.
         if path.name.startswith("_"):
             continue
-        if any(part in {"worktrees", ".venv", "venv", "build", "dist"}
-               for part in parts):
+        if any(part in {"worktrees", "build", "dist"} for part in parts):
+            continue
+        # A virtualenv here does not cause a false failure, it causes a false
+        # PASS: vendored code joins the corpus and can keep a dead name alive
+        # by coincidence. Recognised by `pyvenv.cfg` rather than by name, for
+        # the reason given where that helper is defined.
+        if _in_virtualenv(path):
             continue
         scanned.append(path.read_text(encoding="utf-8"))
     corpus = "\n".join(scanned)
@@ -2245,8 +2427,10 @@ def test_no_file_describes_another_site():
                                                      ".yaml", ".toml",
                                                      ".example"):
             continue
-        if any(part in {"worktrees", ".venv", "venv", "build", "dist", ".git"}
+        if any(part in {"worktrees", "build", "dist", ".git"}
                for part in rel.parts) or path.name.startswith("_"):
+            continue
+        if _in_virtualenv(path):
             continue
         # The suite names these words in order to ban them, so it cannot be
         # scanned for them without failing on its own check.
@@ -2284,6 +2468,7 @@ def test_wording():
                and path.suffix in (".py", ".md", ".txt", ".toml", ".yml",
                                    ".yaml", ".example")
                and ".git" not in path.parts
+               and not _in_virtualenv(path)
                and path.name != "fixtures_generated.json"]
     for path in shipped:
         name = str(path.relative_to(REPO_ROOT))
@@ -2684,6 +2869,8 @@ def main() -> int:
     ok &= test_concurrency_machinery(skips)
     ok &= test_engine_parity(skips)
     ok &= test_module_attributes_exist(skips)
+    ok &= test_virtualenvs_in_the_tree_are_ignored()
+    ok &= test_tree_scanners_skip_virtualenvs()
     ok &= test_no_dead_public_names()
     ok &= test_no_undefined_names()
     ok &= test_dockerfile_matches_its_entrypoint()

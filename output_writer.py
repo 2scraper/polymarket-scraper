@@ -552,12 +552,29 @@ def save(rows: Sequence[Any], out_prefix: str, fmt: str,
 # failure, guarded by the README stating the twenty and the canary asserting
 # it.
 #
-# "no_new_products" stays as the data-side termination condition for
-# `--mode events`, whose page 2..N are event pages named by page 1: a page
-# whose markets are all already in `seen` ends the walk. "pagination_
-# exhausted" is kept for the family's shape.
+# "no_new_products" USED TO BE HERE, as the data-side termination condition
+# for `--mode events`. It is gone, and the removal is the point rather than a
+# tidy-up.
+#
+# The comment above it described a fresh-sku rule — "a page whose markets are
+# all already in `seen` ends the walk" — and the engines had long since
+# stopped doing that; what they actually did was end the walk on a page that
+# produced NO rows. The two are not the same rule and the second one is
+# indefensible here, because `--mode events` walks a FINITE LIST of event
+# URLs that page 1 already named. There is no catalogue to exhaust, so there
+# is no data-side ending to detect: the walk is over when the plan is done.
+#
+# What that cost, reproduced on the code this replaces: one empty event page
+# at position 4 of 20 ended the walk, 17 event pages were never fetched, and
+# the run reported `status: complete` and exit 0 with `pages_completed: 4 of
+# 21` in the same sidecar. Found by a third-party audit; the sidecar had been
+# carrying the evidence against itself the whole time.
+#
+# An event page with no readable markets is now recorded in the sidecar as
+# `pages_without_rows` and the walk carries on. "pagination_exhausted" is
+# kept for the family's shape.
 COMPLETE_STOP_REASONS = ("completed", "pagination_exhausted",
-                         "no_new_products", "listing_has_one_page")
+                         "listing_has_one_page")
 
 
 def finish_run(rows: Sequence[Any], out_prefix: str, fmt: str,

@@ -394,8 +394,11 @@ picked up, without printing secrets.
 * **Exit codes**: `0` ok · `1` crash · `2` bad usage · `3` blocked · `4` zero
   rows · `5` remote API error · `6` partial.
 * **`<out>.meta.json`** per run: status, stop reason, which pages failed by
-  number, the site's own `total_events`, the row counts per page, and the
-  category and locale the URL carried.
+  number, which event pages held no markets (`pages_without_rows`), the
+  site's own `total_events`, the row counts per page, and the category and
+  locale the URL carried. The last two of those answer different questions:
+  a page that FAILED is a hole in the data, a page with no rows is a fact
+  about that event, and `--mode events` keeps walking past the second.
 * **An empty CSV still carries its header.**
 * `diff_runs.py` compares two runs by `sku` and refuses a pair whose `mode`
   differs — a shallow run against a deep one would report a dozen columns as
