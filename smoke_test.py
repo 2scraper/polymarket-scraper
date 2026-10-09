@@ -2208,36 +2208,71 @@ def test_module_attributes_exist(skips):
     return ok
 
 
+# The names `python3 -m venv` is actually told to use around here: the three
+# the README's own instructions produce, plus the per-engine suffix form the
+# "one virtualenv per engine" advice leads to.
+CONVENTIONAL_VENVS = (".venv", "venv", "env", ".venv-playwright",
+                      "venv-selenium", ".venv-pw", "venv_puppeteer")
+
+
 def test_virtualenvs_in_the_tree_are_ignored():
-    group("A virtualenv in the working tree is gitignored, whatever its name")
+    group("The virtualenv names this README leads people to are ignored")
     import subprocess
     ok = True
-    # The glob half of this lives in .gitignore and can always be out-named;
-    # this is the half that cannot. Any directory holding `pyvenv.cfg` IS a
-    # virtualenv, and an unignored one is a `git add -A` away from being
-    # committed — which is how this repo's own `.venv-pw` sat untracked and
-    # unignored while the file listed `.venv`, `venv` and `env`.
+    # ASSERTED FOR THE CONVENTIONAL NAMES, and REPORTED for anything else.
     #
-    # Scanning what is THERE rather than asserting patterns, so a venv under
-    # a name nobody predicted still fails. On a clean checkout there is
-    # nothing to find and the check says so rather than passing silently
-    # (a check that starts passing once its input disappears is the failure
-    # mode this suite keeps meeting).
-    found = []
+    # The first version of this check asserted that EVERY directory holding a
+    # `pyvenv.cfg` is ignored, "whatever its name". That is a promise
+    # `.gitignore` cannot keep — a glob cannot recognise a virtualenv — and
+    # the cost showed up immediately: a fresh clone, with `python3 -m venv
+    # myenv` run in it exactly as a new reader might, failed its first
+    # `python3 smoke_test.py` on this check alone.
+    #
+    # That is the failure this suite exists to avoid rather than to cause: a
+    # guard somebody has to argue with on their first command is one they
+    # learn to suppress, and the next real finding goes with it. So the hard
+    # assertion covers what the project can actually promise — the names its
+    # own instructions produce — and an unexpected name gets a line of
+    # output instead of a red suite.
+    for name in CONVENTIONAL_VENVS:
+        # Probe a path INSIDE the directory, not the directory itself. A
+        # trailing-slash pattern only matches something git can see IS a
+        # directory, so asking about a name that does not exist in this
+        # checkout answers "not ignored" for every pattern that would in
+        # fact cover it — the first version of this check failed on five of
+        # the seven names it had just been written to cover.
+        result = subprocess.run(
+            ["git", "check-ignore", "--no-index", "-q", name + "/pyvenv.cfg"],
+            cwd=REPO_ROOT, capture_output=True)
+        if result.returncode == 128:
+            print("  SKIP  not a git checkout — cannot ask what is ignored")
+            return ok
+        ok &= check("a virtualenv called %s/ would be ignored" % name,
+                    result.returncode == 0)
+    # `--no-index` is load-bearing HERE and not decoration. `git
+    # check-ignore` skips TRACKED paths by default, and `.env.example` is
+    # tracked — so without it this answers "not ignored" whatever the
+    # patterns say, and the assertion could never fail. Found by planting
+    # the fault (commenting out the `!.env.example` negation) and watching
+    # the suite stay green.
+    ok &= check("...and .env.example is still NOT ignored",
+                subprocess.run(["git", "check-ignore", "--no-index", "-q",
+                                ".env.example"],
+                               cwd=REPO_ROOT,
+                               capture_output=True).returncode != 0)
+
+    unexpected = []
     for cfg in pathlib.Path(REPO_ROOT).rglob("pyvenv.cfg"):
         if ".git" in cfg.parts:
             continue
-        found.append(cfg.parent)
-    if not found:
-        return check("no virtualenv in the tree to check (nothing to report)",
-                     True)
-    for venv in found:
-        rel = venv.relative_to(REPO_ROOT)
-        result = subprocess.run(
-            ["git", "check-ignore", "-q", str(rel)],
-            cwd=REPO_ROOT, capture_output=True)
-        ok &= check("the virtualenv %s/ is gitignored" % rel,
-                    result.returncode == 0)
+        rel = cfg.parent.relative_to(REPO_ROOT)
+        if subprocess.run(["git", "check-ignore", "-q", str(rel)],
+                          cwd=REPO_ROOT, capture_output=True).returncode != 0:
+            unexpected.append(str(rel))
+    if unexpected:
+        print("  NOTE  %s is a virtualenv and is not ignored here. Nothing "
+              "is wrong with it; `git add -A` would just pick it up. Add it "
+              "to .gitignore, or name it .venv." % ", ".join(unexpected))
     return ok
 
 
