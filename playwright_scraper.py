@@ -808,10 +808,18 @@ def _fetch_pages_concurrently(args, pool, specs, concurrency: int):
 
     results = []
     results_lock = threading.Lock()
-    # Set when a day comes back with no rows at all. Without it, asking for
-    # 40 days of a tag that only published on three of them would fetch 37
-    # empty ones. Workers check it before taking more work, so at most
-    # (concurrency - 1) extra fetches are in flight when it trips.
+    # Kept, and deliberately never set by an empty page.
+    #
+    # It arrived from a sibling repo whose pages are consecutive DAYS, where
+    # "asking for 40 days of a tag that only published on three would fetch
+    # 37 empty ones" is a real saving. Here the specs are the event URLs page
+    # 1 named, capped at `--pages - 1`, so that queue cannot contain a page
+    # worth skipping: the engine already logs "the walk is N page(s) long"
+    # when `--pages` exceeds what the listing named. The rule saved nothing
+    # and cost the rest of the walk.
+    #
+    # The plumbing stays because a future terminator with a real signal
+    # behind it belongs here rather than in three copies of a loop.
     exhausted = threading.Event()
 
     def worker(index: int):
@@ -835,14 +843,16 @@ def _fetch_pages_concurrently(args, pool, specs, concurrency: int):
                         with results_lock:
                             results.append(outcome)
                         if outcome.ok and not outcome.products:
-                            logger.info("[%s] page %d returned no rows — "
-                                        "treating that as the end of the "
-                                        "walk and stopping dispatch. On this "
-                                        "site that means an event page held "
-                                        "no markets, which is either a "
-                                        "resolved event or a parse worth "
-                                        "looking at.", name, page_num)
-                            exhausted.set()
+                            # Recorded, NOT acted on. Every spec in this
+                            # queue is an event URL page 1 named, so one
+                            # event with no readable markets is a fact about
+                            # that event and not a signal about the queue.
+                            # Setting `exhausted` here stopped dispatch and
+                            # left the rest of the listing unfetched under
+                            # `status: complete` — see the sequential walk.
+                            logger.info("[%s] page %d returned no rows. "
+                                        "Recording it; the other event pages "
+                                        "are unaffected.", name, page_num)
                 finally:
                     session.close()
         except Exception:  # noqa: BLE001 — a dead worker must not hang the run
@@ -1076,16 +1086,22 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
         outcome.final_url = session.page.url
         return outcome
 
-    if page_flow.should_parse(state) and page_flow.payload_answered(html):
-        # THE FAST PATH, and the normal one: the page's own payload already
-        # names every market this run will write, so there is nothing to wait
-        # for and nothing to scroll. Skipping both is worth about four
-        # minutes a page against the sibling-repo flow this was adapted from,
-        # and costs nothing that was measured — twelve scroll rounds added
-        # zero events on every listing tried.
-        logger.info("Page %d shipped its markets in the page payload — "
-                    "parsing it directly (no readiness wait, no scroll).",
-                    page_num)
+    if page_flow.should_parse(state) and page_flow.payload_arrived(html):
+        # THE FAST PATH, and the normal one: the page's own payload has
+        # arrived, so there is nothing to wait for and nothing to scroll.
+        # Skipping both is worth about four minutes a page against the
+        # sibling-repo flow this was adapted from, and costs nothing that was
+        # measured — twelve scroll rounds added zero events on every listing
+        # tried.
+        #
+        # Gated on the payload ARRIVING rather than on it naming markets: a
+        # payload that arrived with none is an answer, and spending the
+        # readiness timeout and four scroll rounds on it reached the same
+        # exit 4 sixty seconds later (see page_flow.payload_arrived).
+        logger.info("Page %d shipped its payload — parsing it directly (no "
+                    "readiness wait, no scroll)%s.", page_num,
+                    "" if page_flow.payload_answered(html)
+                    else ", and it named no markets")
 
     elif page_flow.should_parse(state):
         selector, threshold = _ready_selector(args), _min_matches(args, html)
@@ -1211,6 +1227,10 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
 def scrape(args) -> int:
     outcomes: List[PageOutcome] = []
     seen_keys = set()
+    # Event pages the walk fetched that held no readable markets. A
+    # fact about those events, recorded for the consumer rather than
+    # acted on as an end-of-walk signal (see the walk below).
+    empty_pages: List[int] = []
     blocked = False
     dedupe_key = "sku"
     stop_reason = "completed"
@@ -1335,7 +1355,7 @@ def scrape(args) -> int:
                     logger.info("Fetching %d event page(s) across %d "
                                 "workers%s.", len(specs), concurrency,
                                 f" over {len(pool)} exit(s)" if pool else "")
-                    rest, unattempted, exhausted = _fetch_pages_concurrently(
+                    rest, unattempted, _exhausted = _fetch_pages_concurrently(
                         args, pool, specs, concurrency)
                     outcomes.extend(rest)
                     failed = [o for o in rest if not o.ok]
@@ -1344,10 +1364,12 @@ def scrape(args) -> int:
                         stop_reason = ("page_load_timeout" if worst.load_failed
                                        else f"blocked_{worst.blocked_by}")
                         blocked = any(o.blocked_by for o in rest)
-                    elif exhausted:
-                        stop_reason = "no_new_products"
                     elif unattempted:
                         stop_reason = "pages_unattempted"
+                    # `exhausted` is deliberately not consulted: nothing in
+                    # this mode sets it (see _fetch_pages_concurrently). It
+                    # used to map an empty event page to `no_new_products`,
+                    # which `COMPLETE_STOP_REASONS` called a whole run.
                     session = None       # already closed
                 elif planned:
                     for index, url in enumerate(planned):
@@ -1373,18 +1395,28 @@ def scrape(args) -> int:
                         seen_keys.update(p.sku for p in outcome.products
                                          if p.sku is not None)
                         if not outcome.products:
-                            # NOT "no new sku": in this mode every event page
-                            # re-states markets page 1 already named, so a
-                            # fresh-sku test would end the walk on page 2 of
-                            # every healthy run and throw away the deep
-                            # columns the walk exists to fetch. The data-side
-                            # ending here (§7) is a page that produced NO
-                            # rows at all.
-                            logger.info("Event page %s produced no rows at "
-                                        "all — treating that as the end of "
-                                        "the walk.", url)
-                            stop_reason = "no_new_products"
-                            break
+                            # NOT the end of the walk. This used to `break`
+                            # here, and that was wrong for a reason specific
+                            # to this mode: the event URLs are not addresses
+                            # this run is guessing at, they are a FINITE LIST
+                            # page 1 already named, capped at `--pages - 1`.
+                            # There is no catalogue left to exhaust and
+                            # nothing to save by stopping — the queue is
+                            # exactly as long as the listing's own event list
+                            # — so one event with no readable markets says
+                            # nothing whatever about the nineteen after it.
+                            #
+                            # Reproduced on the code this replaces: a single
+                            # empty page at position 4 left 17 of 20 event
+                            # pages unfetched and the run reported
+                            # `status: complete`, exit 0, with
+                            # `pages_completed: 4 of 21` in the same sidecar.
+                            empty_pages.append(page_num)
+                            logger.info("Event page %s produced no rows. "
+                                        "Recording that and carrying on: the "
+                                        "remaining event pages are "
+                                        "independent URLs page 1 already "
+                                        "named.", url)
 
             else:
                 seen_keys.update(p.sku for p in first.products if p.sku is not None)
@@ -1478,6 +1510,11 @@ def scrape(args) -> int:
         "jsonld_confirmed_rows": sum(1 for r in all_rows
                                      if r.data_source == "flight+jsonld"),
         "deep_rows": sum(1 for r in all_rows if r.condition_id),
+        # Event pages that were fetched and held no readable markets. A
+        # consumer needs this to tell "this event has no markets" from "this
+        # event was never fetched" — `pages_failed` and the page counts cover
+        # the second, and nothing covered the first.
+        "pages_without_rows": sorted(empty_pages),
         "category": category_from_url(final_url),
         "locale": locale_of(final_url),
         # Recorded because a reader comparing two runs needs to know the

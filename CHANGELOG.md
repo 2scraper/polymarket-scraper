@@ -10,7 +10,101 @@ from a row count, it leads the section in a blockquote.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`--mode events` stopped at the first event page with no markets and
+  reported the run as `complete`.** Found by a third-party audit of 8
+  October and real. Reproduced against `main` end to end: one empty page at
+  position 4 of 20 left **17 event pages never fetched**, with `status:
+  complete`, exit 0, and `pages_completed: 4 of 21` in the same sidecar —
+  a file contradicting itself, the way a run with FAILED pages used to
+  before that case was fixed.
+
+  The rule arrived from a sibling whose pages are consecutive days, where
+  stopping early genuinely saves fetches. Here pages 2..N are the event URLs
+  page 1 named, capped at `--pages - 1`, so there is no catalogue left to
+  exhaust and nothing to save: the queue is exactly as long as the listing's
+  own event list. The walk now visits every planned URL, records the empty
+  ones in the sidecar as `pages_without_rows`, and keeps `complete` for a
+  run that actually finished its plan. `no_new_products` is set nowhere now
+  and has been removed from `COMPLETE_STOP_REASONS` rather than left as
+  policy with no reader.
+
+- **Every page the site serves was classified as its own 404 — and 12 of 20
+  event pages had every row discarded because of it.** Found while measuring
+  whether an empty event page is an edge case; it is not, because the
+  classifier was manufacturing them. The two defects compound into a
+  silently truncated run reported as complete, which is worse than either.
+
+  Next.js inlines its 404 TEMPLATE — a `"notFound":[…]` branch the router
+  would render if the route had 404'd — into the payload of every page.
+  `looks_not_found` scanned the first 200,000 bytes for that template's
+  wording. Counted 2026-10-09 over the twenty event pages `/predictions`
+  named, as the site serves them: the wording is on **20 of 20**, inside the
+  scanned window on **17 of 20** (always at offset ~134,000), rendered into
+  the body markup on **0 of 5** checked — and **12 of 20 held markets and
+  were read as "this address does not exist"**, 5 to 53 rows each, thrown
+  away by `empty`'s `parse: False`.
+
+  So the markers are gone rather than narrowed: a candidate that is on every
+  good page is not a marker, it is a fact about the site. The content check
+  moved to the top, where a page whose payload names markets is content
+  whatever templates it also ships. Two measurements decided the shape of
+  the fix: a slug that does not exist answers **HTTP 200** (4 of 4), so the
+  status was never the backstop the markers were assumed to have — the
+  docstring promising "a real HTTP 404" was simply wrong — and `"digest"`,
+  which looked like a clean replacement, is on 2 of 10 good pages and was
+  not adopted.
+
+  The browser engines escaped this by byte position rather than by design: a
+  browser serialises rendered markup first and puts the template at 511,547
+  where the served bytes put it at 134,033, on the same URL. The margin on
+  the smallest page measured was 67 KB. `scraper_api_client.py` reads the
+  served bytes and had no margin at all.
+
+- **A nonexistent event cost 67 seconds instead of 8**, as a direct
+  consequence of the reclassification above: `shell` spends the readiness
+  wait and four scroll rounds, every round logging "added no events
+  (0 -> 0)". That wait exists for one case — the payload never arrived — so
+  it is now gated on the payload ARRIVING rather than on it naming markets
+  (`page_flow.payload_arrived`, consulted by `is_unpainted` and by all three
+  engines' fast path). Back to 7.8s, same exit 4.
+
+- **The tree-wide scanners walked into a virtualenv.** Not in the audit —
+  the suite failed on its own working tree. The scanner widened to the whole
+  tree in the previous release reported that pip's vendored
+  `charset_normalizer` "describes this site", because it skipped virtualenvs
+  by NAME and this one is called `.venv-pw`. `.github/ci_checks.py` had
+  already been taught to recognise a venv by `pyvenv.cfg`; the four scanners
+  in `smoke_test.py` had not. It is the first thing a new user sees from
+  `python3 smoke_test.py`, since the README tells them to make a virtualenv
+  per engine and never says where.
+
+- **A virtualenv in the working tree was not ignored.** `.gitignore` listed
+  `.venv`, `venv` and `env`; the one made while working on this change is
+  called `.venv-pw`, so it was untracked and NOT ignored — one `add -A` from
+  being committed, which is the same name-versus-kind mistake as the
+  scanners above. The patterns are broader now, and because a glob can
+  always be out-named, the suite also asserts that every directory holding a
+  `pyvenv.cfg` really is ignored.
+
 ### Added
+
+- **`captures/event_served_bytes.html` — the first capture of what the HTTP
+  client path actually sees.** All eleven existing captures are a browser's
+  `page.content()`, which is a different document shape from the same URL,
+  and that is precisely why the 404-template defect was invisible to a green
+  suite. `make_fixtures.py` now carries the `"notFound"` branch through the
+  trim on purpose: without it the new checks could not fail, which the first
+  version of this fixture demonstrated by passing against the unfixed
+  parser.
+
+- **A check that every tree-wide scanner skips virtualenvs structurally**,
+  pinned as wiring rather than by content. The scanners fail three different
+  ways — a false FAILURE on the describes-this-site scan, a false PASS on
+  the dead-name corpus (vendored code keeps a dead name alive), and no
+  effect at all on the banned-wording scan — and only the first is visible
+  from a planted fault.
 
 - **The repo is public**, and the published surfaces are now checkable. Its
   GitHub description had shipped carrying the wording §12 bans for the

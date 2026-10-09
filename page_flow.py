@@ -118,6 +118,26 @@ def payload_answered(html: Optional[str]) -> bool:
                               or '"markets":[' in payload)
 
 
+def payload_arrived(html: Optional[str]) -> bool:
+    """Whether the page's own payload arrived AT ALL, markets or not.
+
+    The distinction from `payload_answered` is what the readiness wait is
+    actually for. That wait exists for one case: the payload was absent and
+    the DOM is the only thing that can still arrive. Once the payload is
+    here, waiting and scrolling cannot add a market the server did not send —
+    this site inlines its markets in the FIRST response, which is the
+    measurement the fast path is already built on.
+
+    So a payload that arrived carrying no markets is an answer, not a page
+    that is still painting, and it is answered in a second rather than in
+    sixty. Before this existed, a URL whose event does not exist spent the
+    full readiness timeout plus four scroll rounds — measured 2026-10-09 at
+    67 s against 8 s — to reach the same exit 4, and every scroll round
+    logged "added no events (0 -> 0)" while it did so.
+    """
+    return bool(flight_payload(html))
+
+
 def wait_for_count(count: Callable[[str], int], sleep: Callable[[int], None],
                    selector: str, minimum: int, timeout_ms: int,
                    poll_ms: int = 500) -> int:
@@ -297,8 +317,19 @@ def counts_as_blocked(state: str) -> bool:
 
 
 def is_unpainted(state: str, html: Optional[str]) -> bool:
-    """Whether this page is served but has not painted its grid yet."""
+    """Whether this page is served but has not painted its grid yet.
+
+    A page whose payload has ALREADY ARRIVED is not unpainted — it is
+    answered. This site inlines its markets in the first response, so once
+    the payload is in hand, waiting for a grid that is not coming spends the
+    full readiness timeout to reach the same conclusion. Measured 2026-10-09
+    on an event slug that does not exist: 25s of readiness wait and four
+    scroll rounds, every round logging "added no events (0 -> 0)", before the
+    same exit 4 the fast path reaches in eight seconds.
+    """
     if state != "shell":
+        return False
+    if payload_arrived(html):
         return False
     return served_by_polymarket(html or "")
 

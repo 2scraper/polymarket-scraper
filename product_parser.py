@@ -1390,21 +1390,43 @@ def served_by_polymarket(html: Optional[str]) -> bool:
     return any(marker in head for marker in _SITE_ROOT_MARKERS)
 
 
-# The site's own "this address does not exist", in its own words. An
-# UNAMBIGUOUS POSITIVE SIGNAL and therefore checked before any threshold
-# (§17's classification-order trap): a real page that happened to reference
-# few assets must not read as blocked, and this page is a correct answer to a
-# wrong URL rather than a failure.
-_NOT_FOUND_MARKERS = ("page not found", "this page could not be found")
+# This used to carry two text markers — the site's "page not found" wording —
+# described here as an UNAMBIGUOUS POSITIVE SIGNAL. They were neither, and
+# §18's rule is the one that settles it: count a candidate marker on a page
+# you know is good, and if it appears there it is not a marker, it is a fact
+# about the site.
+#
+# Counted 2026-10-09 against the twenty event pages `/predictions` named, as
+# the site serves them:
+#
+#   "this page could not be found"   present on 20 of 20, always 8 times
+#   ...inside the first 200,000 bytes  on 17 of 20, always at offset ~134,000
+#   ...rendered into the body markup   on 0 of 5 checked, bogus pages included
+#
+# Because Next.js ships its 404 TEMPLATE inside the flight payload of every
+# page it serves — a `"notfound":[…]` branch the router would render if the
+# route had 404'd. It is data describing a page that was not rendered, and
+# matching it classified a healthy event page as `empty`. With `empty`
+# carrying `parse: False`, that discarded every row: 12 of the 20 event pages
+# were read as "this address does not exist" while holding 5 to 53 markets.
+#
+# The status is what is left, and it is kept for the case it describes rather
+# than for one that was observed. Measured the same day, a slug that does not
+# exist answers **HTTP 200** with 617 KB, 4 of 4 — so this function returns
+# False on every page this site currently serves, and the docstring that used
+# to promise "a real HTTP 404" was wrong. A nonexistent event now falls
+# through to `shell`, parses to no rows and exits 4 ("ran fine, found
+# nothing"), which is what a bogus listing tag already did.
 
 
 def looks_not_found(html: Optional[str], status: Optional[int] = None) -> bool:
-    if status == 404:
-        return True
-    if not html:
-        return False
-    return any(m in html[:_MARKER_PREFIX_BYTES].lower()
-               for m in _NOT_FOUND_MARKERS)
+    """True only on an explicit 404 status. NOT OBSERVED on this site.
+
+    No text marker belongs here: every candidate is on the page Polymarket
+    serves for a URL that works (see above). `html` is taken and ignored so
+    the signature survives a site that starts answering differently.
+    """
+    return status == 404
 
 
 # ===========================================================================
@@ -1603,29 +1625,39 @@ def detect_page_state(html: Optional[str], status: Optional[int] = None,
                       url: str = "") -> str:
     """Which of the five states this response is.
 
-    `status` is the SECOND positional argument in this family, and in this
-    one it genuinely carries information: Polymarket answers a slug that does
-    not exist with a real HTTP 404 and its own "Page not found" page, which
-    is a correct answer to a wrong URL rather than a failure.
+    `status` is the SECOND positional argument in this family.
+
+    It used to say here that Polymarket answers a slug that does not exist
+    with a real HTTP 404 and its own "Page not found" page. Measured
+    2026-10-09, both halves are false: a nonexistent slug answers HTTP 200
+    (4 of 4), and the "page not found" wording is on every page the site
+    serves, including the ones holding markets. See looks_not_found.
     """
     if not html:
         return "blocked"
 
-    # 1. The site's own "this does not exist". Unambiguous, and checked
-    #    before anything else including the status, because the 404 page is
-    #    served by Polymarket and would otherwise have to survive every
-    #    marker check below to be recognised.
-    if looks_not_found(html, status):
-        return "empty"
-
-    # 2. The site's own data. A page that names markets IS content, whatever
-    #    else is on it — and this is the check that stops a vendor marker in
-    #    a script bundle from overruling a page holding the full grid (§18).
+    # 1. The site's own data, and it goes FIRST. A page that names markets IS
+    #    content, whatever else is on it — a vendor marker in a script bundle
+    #    (§18), or, as this site turned out to do, a 404 template inlined in
+    #    the payload of every page it serves.
+    #
+    #    This check used to sit SECOND, behind a not-found text marker that
+    #    fired on 17 of 20 healthy event pages, and the ordering is why that
+    #    mistake was able to cost anything: the signal that PROVES the page
+    #    is good was never consulted, because a weaker one had already
+    #    answered. §17 states the rule as "order the signals by how much they
+    #    prove, not by how cheap they are"; this is that, with the stronger
+    #    signal also being the cheap one.
     payload = flight_payload(html)
     if payload and ('"outcomePrices"' in payload or '"markets":[' in payload):
         return "content"
     if count_cards(html) >= MIN_CARD_MATCHES:
         return "content"
+
+    # 2. The site's own "this does not exist", by STATUS alone. Nothing this
+    #    site currently serves reaches it — see looks_not_found.
+    if looks_not_found(html, status):
+        return "empty"
 
     # 3. Only now, on a page that produced nothing, does a vendor marker get
     #    to say what went wrong. It REFINES the reason for a page the policy

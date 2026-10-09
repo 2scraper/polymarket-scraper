@@ -60,8 +60,19 @@ dist/
 build/
 
 # --- environments --------------------------------------------------------
-.venv/
-venv/
+# Virtualenvs, by SHAPE rather than by the three names somebody thought of.
+# The README tells people to make one per engine and does not say where, so
+# they land in the working tree under whatever name the reader picked — a
+# `.venv-pw` made while working on this repo was untracked and NOT ignored,
+# one `git add -A` from being committed. A name is what churns.
+#
+# A glob still cannot recognise a virtualenv the way a program can (the
+# marker is `pyvenv.cfg`), so smoke_test.py asserts that every directory
+# holding one is actually ignored — this list is the cheap half and that
+# check is the one that cannot be out-named.
+.venv*/
+venv*/
+*venv/
 env/
 
 # --- editors / OS --------------------------------------------------------
