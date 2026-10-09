@@ -10,6 +10,24 @@ from a row count, it leads the section in a blockquote.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-10-09
+
+A third-party audit of 8 October, worked end to end. All four of its findings
+were real. Investigating the first one found a second defect underneath it
+that the audit had not seen, and the two compounded: one was manufacturing
+the condition the other mistook for the end of a walk.
+
+> **If you use `--mode events`, this release changes what you get and what
+> the sidecar calls it.** A walk used to stop at the first event page that
+> produced no markets and still report `status: complete` with exit 0 — and
+> a separate defect was making healthy event pages produce no rows, so that
+> was a common case rather than an edge one. A walk that previously returned
+> a few pages' worth of markets under a green status now returns the whole
+> listing's. Expect row counts to rise sharply, expect `complete` to start
+> meaning what it says, and note that `no_new_products` is no longer a stop
+> reason this project emits.
+
+
 ### Fixed
 
 - **`events_on_page_1` under-reported the listing in `--mode events`.** The
@@ -487,6 +505,7 @@ Each of these was found by running the thing rather than by reading it (§15):
 - An issue template described two other sites at once.
 - `scraper_api_client.py` imported a parser function that no longer exists.
 
-[Unreleased]: https://github.com/2scraper/polymarket-scraper/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/2scraper/polymarket-scraper/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/2scraper/polymarket-scraper/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/2scraper/polymarket-scraper/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/2scraper/polymarket-scraper/releases/tag/v0.1.0
