@@ -2026,9 +2026,36 @@ def test_engine_parity(skips):
     group("The three engines agree — flags, in BOTH directions (§17)")
     ok = True
     flagsets = {}
+    sources = {}
     for engine in ENGINES:
         src = open(os.path.join(REPO_ROOT, f"{engine}.py"), encoding="utf-8").read()
+        sources[engine] = src
         flagsets[engine] = set(re.findall(r'p\.add_argument\("(--[a-z0-9-]+)"', src))
+
+    # `events_on_page_1` must be counted from PAGE 1's OWN rows.
+    #
+    # Counting it over the MERGED rows asks a different question, because
+    # `--mode events` replaces a listing row in place with the deeper read
+    # from its event page and the replacement carries that page's number. So
+    # `r.page == 1` over the merged set counts the events that happened NOT
+    # to be upgraded. Measured on a real ten-page walk: 3 reported where
+    # page 1 had named 11, printed beside `total_events: 23475` — which is
+    # exactly the comparison a reader makes to judge how much of the
+    # catalogue a run saw.
+    #
+    # Checked at the source, because the sidecar is assembled inline in each
+    # engine rather than in a function a test can call — and checked in all
+    # three, because this is the shape of mistake that gets fixed in one.
+    for engine in ENGINES:
+        src = sources[engine]
+        expression = re.search(r'"events_on_page_1":(.*?)\n\s*"',
+                               src, re.S)
+        ok &= check("%s computes events_on_page_1" % engine,
+                    expression is not None)
+        if expression:
+            body = expression.group(1)
+            ok &= check("...from page 1's own outcome, not the merged rows",
+                        "o.page_num == 1" in body and "all_rows" not in body)
 
     # The family contract (§9). Every engine must carry all of these.
     contract = {"--url", "--pages", "--category", "--format", "--out", "--delay",

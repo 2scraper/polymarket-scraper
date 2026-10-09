@@ -12,6 +12,29 @@ from a row count, it leads the section in a blockquote.
 
 ### Fixed
 
+- **`events_on_page_1` under-reported the listing in `--mode events`.** The
+  audit's last recommendation asks for a freshness and completeness report
+  so a consumer can see the date, the walk type, the number of events and
+  the gaps. The sidecar already carries all four — `finished_at`, `mode` and
+  `pagination`, `total_events` and `events_on_page_1`, and `pages_failed`
+  beside `pages_without_rows` — so checking that claim was a matter of
+  reading a real sidecar rather than building anything. Which is how this
+  turned up.
+
+  The field was counted over the MERGED rows with `r.page == 1`, and that
+  asks a different question once the walk has merged: a listing row is
+  REPLACED IN PLACE by the deeper read from its event page, and the
+  replacement carries that event page's number. So it counted the events
+  whose rows happened not to be upgraded. Measured on a real ten-page walk:
+  **3 reported where page 1 had named 11** — printed beside
+  `total_events: 23475`, which is exactly the comparison a reader makes to
+  judge how much of the catalogue a run saw.
+
+  Right in `--mode markets`, where nothing is upgraded, which is why it
+  looked fine. Counted from page 1's own rows now, in all three engines,
+  with a check controlled against each engine separately — this is the shape
+  of mistake that gets fixed in one of three.
+
 - **The new virtualenv check failed a fresh clone on its first command.**
   Found by doing the thing that keeps finding this class of bug: cloning the
   published repo the way a stranger does, running `python3 -m venv myenv` in

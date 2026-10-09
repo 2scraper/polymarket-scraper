@@ -1503,8 +1503,23 @@ def scrape(args) -> int:
         # site's own twenty-event cap, not a gap this run failed to close
         # (§8 — an unknown gap is not a gap).
         "total_events": total_events,
-        "events_on_page_1": len({r.event_slug for r in all_rows
-                                 if r.event_slug and r.page == 1}),
+        # Counted from PAGE 1's OWN rows, not from the merged ones.
+        #
+        # It used to read `r.page == 1` over `all_rows`, and that is a
+        # different question once `--mode events` has merged: a listing row
+        # is REPLACED IN PLACE by the deeper read from its event page, and
+        # the replacement carries that event page's number. So the field
+        # counted the events whose rows happened NOT to be upgraded.
+        #
+        # Measured on a real 10-page walk: it reported 3 where page 1 had
+        # named 11 — printed beside `total_events: 23475`, which is exactly
+        # the comparison a consumer makes to judge how much of the catalogue
+        # a run saw. Wrong in the one mode where the question matters, and
+        # right in `--mode markets`, where nothing is upgraded, which is why
+        # it looked fine.
+        "events_on_page_1": len({p.event_slug for o in outcomes
+                                 if o.page_num == 1
+                                 for p in o.products if p.event_slug}),
         "inline_payload_rows": sum(1 for r in all_rows
                                    if r.data_source != "dom"),
         "jsonld_confirmed_rows": sum(1 for r in all_rows
