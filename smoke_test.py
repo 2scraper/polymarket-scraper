@@ -1135,6 +1135,137 @@ def test_one_page_is_complete_not_partial():
     return ok
 
 
+def test_writes_are_atomic():
+    group("A write that dies partway leaves the previous good file alone")
+    import contextlib
+    import json as _json
+    import output_writer
+    import stat as _stat
+    import tempfile
+    ok = True
+
+    # The defect, stated as what it destroys: `open(path, "w")` truncates
+    # before a single byte is written, so a crash, a kill or a full disk
+    # halfway through `json.dump` leaves a SHORTER file where a complete one
+    # was. `save` already refuses to overwrite good output with an EMPTY
+    # result; this is the same promise broken by a different route — the
+    # previous good run destroyed by the attempt to replace it rather than
+    # by its outcome.
+    #
+    # Measured on this repo before the fix: a 204,292-byte good `out.json`
+    # came back 28 bytes and invalid.
+    rows = [Market(sku="%012x" % i, url="https://polymarket.com/event/e",
+                   title="market %d" % i) for i in range(200)]
+
+    class _Boom(Exception):
+        pass
+
+    def _die_partway(obj, fp, *a, **k):
+        # Signature matches json.dump(obj, fp, ...): the FILE is second.
+        fp.write('[\n  {"sku": "000000000000",\n')
+        raise _Boom("interrupted mid-write")
+
+    @contextlib.contextmanager
+    def _truncating(path, newline=None):
+        with open(path, "w", encoding="utf-8", newline=newline) as fh:
+            yield fh
+
+    def _survives(writer):
+        """Good file size, size after an interrupted write, stray files."""
+        directory = tempfile.mkdtemp()
+        target = os.path.join(directory, "out.json")
+        real_atomic, real_dump = output_writer._atomic, _json.dump
+        output_writer._atomic = writer
+        try:
+            output_writer.write_json(rows, target)
+            good = os.path.getsize(target)
+            _json.dump = _die_partway
+            try:
+                output_writer.write_json(rows, target)
+            except _Boom:
+                pass
+            finally:
+                _json.dump = real_dump
+            after = os.path.getsize(target)
+            try:
+                _json.load(open(target, encoding="utf-8"))
+                valid = True
+            except Exception:  # noqa: BLE001 — "did it parse" is the question
+                valid = False
+            strays = [n for n in os.listdir(directory) if n != "out.json"]
+            return good, after, valid, strays
+        finally:
+            output_writer._atomic = real_atomic
+
+    # The CONTROL first: without it, "the file survived" could be a property
+    # of the test rather than of the writer.
+    good, after, valid, _ = _survives(_truncating)
+    ok &= check("control: a truncating writer really does destroy it "
+                "(%d bytes -> %d, parses: %s)" % (good, after, valid),
+                after < good and not valid)
+
+    good, after, valid, strays = _survives(output_writer._atomic)
+    ok &= check("the previous good file survives an interrupted write",
+                after == good and valid)
+    ok &= check("...and no half-written temp file is left beside it",
+                strays == [])
+
+    # The half eight sibling repos get wrong. NamedTemporaryFile creates its
+    # file 0600 and a rename keeps that, so an output nobody else can read
+    # is the default unless the mode is set back deliberately.
+    directory = tempfile.mkdtemp()
+    target = os.path.join(directory, "mode.json")
+    previous = os.umask(0o022)
+    try:
+        output_writer.write_json(rows, target)
+        mode = _stat.S_IMODE(os.stat(target).st_mode)
+        ok &= check("a new output is readable, not 0600 (got %s under umask "
+                    "022)" % oct(mode), mode == 0o644)
+        os.chmod(target, 0o600)
+        output_writer.write_json(rows, target)
+        kept = _stat.S_IMODE(os.stat(target).st_mode)
+        ok &= check("...and a target somebody tightened keeps its own mode",
+                    kept == 0o600)
+    finally:
+        os.umask(previous)
+
+    # `newline=""` has to survive the move into the temp file, or the csv
+    # module's own "\r\n" is translated again and every row gains a doubled
+    # carriage return.
+    #
+    # The BEHAVIOUR cannot be tested here, and that is worth stating rather
+    # than leaving as a check that looks load-bearing: the translation only
+    # happens where os.linesep is "\r\n", so on Linux — and therefore on CI
+    # — dropping `newline=""` changes the bytes not at all. Planting that
+    # fault left the suite green, which is a hole in the suite and not a
+    # pass. So the row count below is a sanity check, and the assertion that
+    # can actually fail is the WIRING one after it.
+    csv_path = os.path.join(directory, "out.csv")
+    output_writer.write_csv(rows[:3], csv_path, row_cls=Market)
+    raw = open(csv_path, "rb").read()
+    ok &= check("the CSV has one line terminator per row plus the header",
+                raw.count(b"\r\n") == 4 and raw.count(b"\r\r\n") == 0)
+
+    # And the wiring: a writer that quietly goes back to `open` would pass
+    # every check above that does not call it.
+    source = open(os.path.join(REPO_ROOT, "output_writer.py"),
+                  encoding="utf-8").read()
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        if node.name not in ("write_json", "write_csv", "write_run_meta"):
+            continue
+        body = ast.get_source_segment(source, node) or ""
+        ok &= check("%s() writes through _atomic" % node.name,
+                    "_atomic(" in body and 'open(' not in body)
+        if node.name == "write_csv":
+            # The one that a Linux run cannot catch by behaviour.
+            ok &= check("...and hands it newline='' for the csv module",
+                        'newline=""' in body)
+    return ok
+
+
 def test_output_contract():
     group("The output contract (§9)")
     ok = True
@@ -2857,6 +2988,7 @@ def main() -> int:
     ok &= test_page_flow_policy()
     ok &= test_scroll_loop()
     ok &= test_one_page_is_complete_not_partial()
+    ok &= test_writes_are_atomic()
     ok &= test_output_contract()
     ok &= test_writers_and_finish_run()
     ok &= test_diff()
