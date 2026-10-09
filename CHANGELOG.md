@@ -10,6 +10,41 @@ from a row count, it leads the section in a blockquote.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The new virtualenv check failed a fresh clone on its first command.**
+  Found by doing the thing that keeps finding this class of bug: cloning the
+  published repo the way a stranger does, running `python3 -m venv myenv` in
+  it, and typing `python3 smoke_test.py`. The only failure was a check added
+  hours earlier — which asserted that EVERY directory holding a
+  `pyvenv.cfg` is gitignored, "whatever its name".
+
+  That is a promise `.gitignore` cannot keep: a glob cannot recognise a
+  virtualenv, so the check demanded something no pattern set can satisfy and
+  greeted a reasonable first command with a red suite. A guard somebody has
+  to argue with on their first command is one they learn to suppress, and
+  the next real finding goes with it — which is the failure this suite
+  exists to avoid rather than to cause.
+
+  The hard assertion now covers what the project can actually promise: the
+  virtualenv names its own instructions lead people to. An unexpected name
+  gets one line of output explaining what would happen and how to fix it,
+  and the suite stays green.
+
+  Two things inside that check were also wrong and are worth naming, because
+  both passed for the wrong reason:
+
+  * `git check-ignore` matches a trailing-slash pattern only against
+    something it can see IS a directory, so asking about a name that does
+    not exist in this checkout answered "not ignored" for five of the seven
+    names the check had just been written to cover. It probes a path INSIDE
+    the directory now.
+  * `git check-ignore` skips TRACKED paths by default, and `.env.example` is
+    tracked — so the assertion that it stays visible could never fail
+    whatever the patterns said. Caught by planting the fault, removing the
+    `!.env.example` negation, and watching the suite stay green. It passes
+    `--no-index` now.
+
 ### Added
 
 - **The canary now runs all three engines against the live site, daily.**
