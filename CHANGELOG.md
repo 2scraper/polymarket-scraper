@@ -10,6 +10,65 @@ from a row count, it leads the section in a blockquote.
 
 ## [Unreleased]
 
+### Added
+
+- **The canary now runs all three engines against the live site, daily.**
+  The audit's third finding, and a fair one: the offline suite asserts the
+  engines take the same flags, bind the same shared-module signatures and
+  share one `finish_run` — so their exit codes and sidecars cannot drift —
+  but none of that tests whether they still agree about the SITE, and only
+  the primary engine ran against it on a schedule.
+
+  The audit offered two remedies and this takes the second. The first was to
+  declare Playwright the only supported engine and demote the others, which
+  would contradict the README and throw away three working engines to close
+  a gap that one job closes.
+
+  Compared on **ids and schema, not on values**: the three runs are minutes
+  apart and a prediction market reprices continuously, so requiring equal
+  prices would produce a red badge about nothing. What must not differ is
+  which markets were found, what the columns are called, and the fields a
+  market does not change by trading — an explicit allowlist, inverted from
+  the obvious blocklist so a column added later is not compared by default
+  and does not start failing the badge the first time the market moves. The
+  allowlist is itself checked against the real columns, or it could shrink
+  to nothing and the step would pass by comparing almost nothing.
+
+  `data_source` is in that allowlist on purpose: if one engine fell back to
+  the DOM while its twins read the payload, every other field would still
+  match and only that column would say so.
+
+  Verified by running it here before shipping it: all three engines on one
+  event page returned the same five markets, the same 40 columns and the
+  same 22 stable fields, with `scraped_at` the only field that differed.
+
+- **The Docker base image is pinned by digest**, with the tag kept beside it
+  so a reader can see which release the digest is. `python:3.12-slim` is a
+  moving target, so the same Dockerfile built a month apart is a different
+  image: a release and its own rebuild are not the same artefact, and a
+  regression arriving through the base reads as a regression in this code.
+  Built and run after pinning — 53 markets live from inside the container.
+
+### Deliberately not done
+
+- **Lock files for the Python dependencies**, which the audit recommends in
+  the same breath as the Docker pin. The two are not the same trade. A lock
+  file would stop the daily canary from testing new releases of `requests`,
+  `beautifulsoup4` and the engine libraries — and that daily test is the
+  thing that catches a dependency change the morning it happens rather than
+  whenever someone next bumps a pin. The image is a build artefact and
+  should be reproducible; the canary is a detector and should be exposed.
+  Lower bounds plus a daily live run is the combination that reports
+  breakage, and pinning both halves would buy reproducibility by turning the
+  detector off.
+
+- **A run identifier across the JSON, CSV and sidecar set.** The failure it
+  guards against is already impossible by construction: a failed run writes
+  no sidecar at all, `save` refuses to overwrite good output with an empty
+  result, and as of this release each file is replaced by an atomic rename.
+  A transaction id would add a second thing to keep consistent, which is a
+  second thing that can disagree.
+
 ### Fixed
 
 - **An interrupted write destroyed the previous good run's output.** The

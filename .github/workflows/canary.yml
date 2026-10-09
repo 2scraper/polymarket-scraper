@@ -274,3 +274,223 @@ jobs:
             canary_*_debug.png
           if-no-files-found: ignore
           retention-days: 14
+
+  # THE LIVE CROSS-ENGINE CHECK.
+  #
+  # The offline suite already asserts that the three engines take the same
+  # flags, bind the same shared-module signatures and share one `finish_run`,
+  # so their exit codes and sidecars cannot drift. What none of that tests is
+  # whether they still agree about the SITE — and only the primary engine was
+  # ever run against it on a schedule. A third-party audit raised exactly
+  # this, and offered two remedies: declare Playwright the only supported
+  # engine, or run a small live check on each. The README promises three, so
+  # this is the second.
+  #
+  # Compared on IDS AND SCHEMA, not on values. The three runs happen minutes
+  # apart and a prediction market reprices continuously, so requiring equal
+  # prices would produce a red badge about nothing — and a check that is
+  # always red teaches everyone to ignore checks. What must not differ is
+  # which markets were found, what the columns are called, and the fields a
+  # market does not change by trading.
+  cross-engine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # One venv per engine, from that engine's own requirements file. The
+      # three declare mutually unsatisfiable pins (pyee <12 vs >=13, urllib3
+      # <2.0 vs >=2.6), so a single environment would have pip resolve the
+      # conflict by reaching for whatever it can — which in a sibling repo
+      # silently installed a stub version and left CI green against a release
+      # the repo does not support.
+      - name: Install each engine in its own virtualenv
+        run: |
+          for engine in playwright selenium puppeteer; do
+            python -m venv ".venv-$engine"
+            ".venv-$engine/bin/pip" install --quiet --upgrade pip
+            ".venv-$engine/bin/pip" install --quiet \
+              -r requirements.txt -r "requirements-$engine.txt"
+          done
+          .venv-playwright/bin/playwright install --with-deps chromium
+
+      # ONE event page, not a listing. An event page is a single fetch whose
+      # row set is decided by the event rather than by what the front page is
+      # promoting this minute, so the three runs are comparable without
+      # pinning a URL that will resolve and 404 one day: the URL comes from
+      # the listing, chosen at run time.
+      - name: Pick an event the listing names right now
+        id: pick
+        shell: bash
+        run: |
+          set +e
+          .venv-playwright/bin/python playwright_scraper.py \
+            --url "https://polymarket.com/predictions" \
+            --mode markets --format json --out cross_listing
+          code=$?
+          set -e
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          if [ "$code" != "0" ]; then exit 0; fi
+          url=$(python -c "
+          import json
+          rows = json.load(open('cross_listing.json'))
+          for r in rows:
+              if r.get('event_url'):
+                  print(r['event_url']); break
+          ")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "picked $url"
+
+      - name: Run the same event page through all three engines
+        if: steps.pick.outputs.exit_code == '0'
+        shell: bash
+        run: |
+          # Spelled out rather than looped over `$engine`. A loop reads
+          # well and makes the engine names invisible to anything grepping
+          # this file — including the offline check that asserts the canary
+          # still covers every engine the README promises. Three lines are
+          # worth a check that can fail.
+          #
+          # `set +e`: a refused engine must not stop its twins, and the
+          # comparison step decides what a missing run means.
+          set +e
+          .venv-playwright/bin/python playwright_scraper.py \
+            --url "${{ steps.pick.outputs.url }}" \
+            --mode event --format json --out cross_playwright
+          echo "playwright_scraper.py exited $?"
+          .venv-selenium/bin/python selenium_scraper.py \
+            --url "${{ steps.pick.outputs.url }}" \
+            --mode event --format json --out cross_selenium
+          echo "selenium_scraper.py exited $?"
+          .venv-puppeteer/bin/python puppeteer_scraper.py \
+            --url "${{ steps.pick.outputs.url }}" \
+            --mode event --format json --out cross_puppeteer
+          echo "puppeteer_scraper.py exited $?"
+          exit 0
+
+      - name: The three must agree on ids and schema
+        if: steps.pick.outputs.exit_code == '0'
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+
+          ENGINES = ("playwright", "selenium", "puppeteer")
+
+          # An ALLOWLIST of fields a market does not change by trading, not a
+          # blocklist of the ones it does. Inverted deliberately: with a
+          # blocklist a column added later is compared by default and starts
+          # failing the badge the first time the market moves, which is how a
+          # live check teaches people to ignore it. Schema drift is caught by
+          # the column-set comparison below regardless of this list.
+          #
+          # `data_source` earns its place: if one engine fell back to the DOM
+          # while its twins read the payload, every one of these would still
+          # match and only this column would say so.
+          STABLE = {
+              "source", "url", "sku", "title", "outcomes", "group_item_title",
+              "event_id", "event_slug", "event_title", "event_url",
+              "category", "subcategory", "tags", "start_date", "end_date",
+              "market_id", "condition_id", "clob_token_ids", "neg_risk",
+              "data_source", "page", "position",
+          }
+
+          runs, missing = {}, []
+          for engine in ENGINES:
+              path = Path("cross_%s.json" % engine)
+              if not path.exists():
+                  missing.append(engine)
+                  continue
+              runs[engine] = json.loads(path.read_text())
+
+          # A run that was refused says something about this runner's
+          # address, not about the engine. Warn in words rather than failing
+          # the badge — but never let the warning read as a pass.
+          if missing:
+              summary = ("%s produced no rows; the cross-engine comparison "
+                         "did NOT run for %s today."
+                         % (", ".join(missing), ", ".join(missing)))
+              print("::warning::" + summary)
+              with open("%s" % __import__("os").environ["GITHUB_STEP_SUMMARY"],
+                        "a") as fh:
+                  fh.write("### cross-engine canary\n\n" + summary + "\n")
+          if len(runs) < 2:
+              print("fewer than two engines returned rows — nothing to "
+                    "compare. Not a pass.")
+              raise SystemExit(0)
+
+          fail = []
+          base = ENGINES[0] if ENGINES[0] in runs else sorted(runs)[0]
+          base_rows = {r["sku"]: r for r in runs[base]}
+
+          for engine, rows in runs.items():
+              if engine == base:
+                  continue
+              other = {r["sku"]: r for r in rows}
+
+              # IDS. The same event page read twice must name the same
+              # markets, whichever driver fetched it.
+              if set(other) != set(base_rows):
+                  only_base = sorted(set(base_rows) - set(other))[:3]
+                  only_other = sorted(set(other) - set(base_rows))[:3]
+                  fail.append("%s and %s disagree on which markets exist "
+                              "(%s only in %s, %s only in %s)"
+                              % (base, engine, only_base, base,
+                                 only_other, engine))
+
+              # SCHEMA. A column that exists for one engine and not another
+              # is the drift this check is for.
+              for sku in sorted(set(other) & set(base_rows)):
+                  a, b = base_rows[sku], other[sku]
+                  if set(a) != set(b):
+                      fail.append("%s and %s produce different columns: %s"
+                                  % (base, engine,
+                                     sorted(set(a) ^ set(b))))
+                      break
+
+              # The STABLE fields of a market the site did not change.
+              for sku in sorted(set(other) & set(base_rows)):
+                  a, b = base_rows[sku], other[sku]
+                  differing = [k for k in sorted(STABLE & set(a))
+                               if a[k] != b.get(k)]
+                  if differing:
+                      fail.append("%s and %s disagree on %s for %s: %r vs %r"
+                                  % (base, engine, differing[0], sku,
+                                     a[differing[0]],
+                                     b.get(differing[0])))
+                      break
+
+          # The allowlist has to name real columns, or it silently shrinks to
+          # nothing and this step passes by comparing almost no fields.
+          columns = set(next(iter(runs.values()))[0]) if any(
+              runs.values()) else set()
+          unknown = sorted(STABLE - columns)
+          if columns and unknown:
+              fail.append("STABLE names %s, which are not columns — the "
+                          "comparison was narrower than it reads" % unknown)
+          if columns and len(STABLE & columns) < 15:
+              fail.append("only %d stable columns compared; the allowlist has "
+                          "drifted away from the schema"
+                          % len(STABLE & columns))
+
+          print("compared %s: %s"
+                % (sorted(runs), {e: len(r) for e, r in runs.items()}))
+          if fail:
+              for f in fail:
+                  print("FAIL: " + f)
+              raise SystemExit(1)
+          print("the engines agree on ids, columns and every stable field.")
+
+      - name: Upload what the three engines produced
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cross-engine-artifacts
+          path: |
+            cross_*.json
+            cross_*.meta.json
+          if-no-files-found: ignore

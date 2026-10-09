@@ -9,7 +9,25 @@
 # Pass --proxy/--twocaptcha-key the same way as running locally, or mount a
 # .env at /app/.env — nothing here bakes in a credential, and .dockerignore
 # keeps one out of the build context.
-FROM python:3.12-slim
+# PINNED BY DIGEST, and the tag kept beside it so a reader can see which
+# release this is. `python:3.12-slim` is a moving target: the same Dockerfile
+# built a month apart is a different image, which is exactly the
+# reproducibility gap an audit raised — a release built today and the same
+# release rebuilt later are not the same artefact, and a regression that
+# arrives through the base image looks like a regression in this code.
+#
+# Resolved 2026-10-09 from the tag it replaces, so this IS 3.12-slim as of
+# that date rather than a version chosen here. To move it deliberately:
+#
+#   docker pull python:3.12-slim
+#   docker inspect --format='{{index .RepoDigests 0}}' python:3.12-slim
+#
+# This is the half of "pin everything" worth taking. Lock files for the
+# Python dependencies are deliberately NOT added — see CHANGELOG — because
+# they would stop the daily canary from testing new releases of those
+# libraries, which is the thing that catches a dependency change the morning
+# it happens.
+FROM python:3.12-slim@sha256:05cda9777409a9c3ffddd94a4c476b79f0769a0b4857f0c7ed9226b6800b0d6f
 
 WORKDIR /app
 
