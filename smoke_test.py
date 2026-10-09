@@ -2241,6 +2241,45 @@ def test_virtualenvs_in_the_tree_are_ignored():
     return ok
 
 
+def test_the_canary_covers_all_three_engines():
+    group("The live canary runs every engine the README promises")
+    ok = True
+    # The offline suite asserts the three engines take the same flags, bind
+    # the same shared-module signatures and share one `finish_run`, so their
+    # exit codes and sidecars cannot drift. None of that tests whether they
+    # still agree about the SITE, and for a while only the primary engine ran
+    # against it on a schedule.
+    #
+    # A third-party audit offered two remedies: declare Playwright the only
+    # supported engine, or check the others live. The README promises three,
+    # so this pins the second — and pins it against the README rather than
+    # against a hardcoded list, so dropping an engine from one without the
+    # other fails here.
+    path = os.path.join(REPO_ROOT, ".github", "workflows", "canary.yml")
+    if not os.path.exists(path):
+        # The Dockerfile copies no .github/, and this suite runs inside the
+        # image at build time. Keyed on the whole directory being absent, not
+        # on this file being missing, so a deleted workflow still fails.
+        if not os.path.exists(os.path.join(REPO_ROOT, ".github")):
+            print("  SKIP  no .github/ here (the image carries none)")
+            return ok
+        return check("the canary workflow exists", False)
+    canary = open(path, encoding="utf-8").read()
+    for engine in ENGINES:
+        # INVOKED, not merely mentioned. The first version of this check
+        # looked for the file name anywhere in the workflow, and an `echo`
+        # naming the engine was enough to satisfy it — planting the fault
+        # (removing the line that runs selenium, leaving the line that logs
+        # its exit code) left the suite green.
+        ok &= check("the canary runs %s" % engine,
+                    bool(re.search(r"bin/python\s+%s\.py" % re.escape(engine),
+                                   canary)))
+    ok &= check("...and compares them on ids rather than on prices",
+                "STABLE" in canary and "disagree on which markets exist"
+                in canary)
+    return ok
+
+
 def test_tree_scanners_skip_virtualenvs():
     group("Every tree-wide scanner skips a virtualenv (structurally)")
     ok = True
@@ -2415,6 +2454,26 @@ def test_dockerfile_matches_its_entrypoint():
     if not os.path.exists(path):
         return check("a Dockerfile exists", False)
     dockerfile = open(path, encoding="utf-8").read()
+
+    # The base image is pinned BY DIGEST. `python:3.12-slim` is a moving
+    # target, so the same Dockerfile built a month apart is a different
+    # image: a release and its own rebuild are then not the same artefact,
+    # and a regression arriving through the base reads as a regression in
+    # this code. Raised by a third-party audit as part of a wider "pin
+    # everything"; this is the half that was taken, and the CHANGELOG says
+    # why lock files were not.
+    froms = [l.strip() for l in dockerfile.splitlines()
+             if l.strip().upper().startswith("FROM ")]
+    ok &= check("the Dockerfile has exactly one FROM (found %d)" % len(froms),
+                len(froms) == 1)
+    for line in froms:
+        ok &= check("...pinned by digest, not by a moving tag (%s)"
+                    % line[:60],
+                    bool(re.search(r"@sha256:[0-9a-f]{64}\b", line)))
+        ok &= check("...with the tag kept beside it, so a reader can see "
+                    "which release that digest is",
+                    bool(re.search(r"FROM\s+\S+:[\w.\-]+@sha256:", line)))
+
     # Join backslash continuations first: the COPY list spans five lines, and
     # a line-by-line reader sees an empty list and passes vacuously.
     joined = re.sub(r"\\\s*\n\s*", " ", dockerfile)
@@ -3002,6 +3061,7 @@ def main() -> int:
     ok &= test_engine_parity(skips)
     ok &= test_module_attributes_exist(skips)
     ok &= test_virtualenvs_in_the_tree_are_ignored()
+    ok &= test_the_canary_covers_all_three_engines()
     ok &= test_tree_scanners_skip_virtualenvs()
     ok &= test_no_dead_public_names()
     ok &= test_no_undefined_names()

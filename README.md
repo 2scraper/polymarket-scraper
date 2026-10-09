@@ -422,6 +422,17 @@ one real `--mode events` walk and one listing run daily, and asserts the
 pagination, the deep columns, the price coverage and the site's own
 `total_events`.
 
+It also runs **all three engines against one event page every day** and
+checks that they still agree. The offline suite already holds them to the
+same flags, the same shared-module signatures and one `finish_run`, so their
+exit codes and sidecars cannot drift — but only a live run can show whether
+they still read the SITE the same way. The comparison is on ids and schema,
+never on prices: the three runs are minutes apart and a prediction market
+reprices continuously, so what must match is which markets were found, what
+the columns are called, and every field a market does not change by trading.
+Measured 2026-10-09 on one event page: the same five markets, the same forty
+columns, and `scraped_at` the only field that differed between engines.
+
 ---
 
 ## Licence
