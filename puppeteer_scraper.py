@@ -1038,7 +1038,7 @@ def parse_args():
                         "--mode markets and --mode event for a second "
                         "reason: those are one fetch each and there is no "
                         "address to hand a worker.")
-    p.add_argument("--retries", type=int, default=3,
+    p.add_argument("--retries", type=page_flow.attempts, default=3,
                    help="Attempts per page load before giving up (default 3).")
     p.add_argument("--retry-delay", type=float, default=2.0,
                    help="Seconds before the first page-load retry, doubling "
