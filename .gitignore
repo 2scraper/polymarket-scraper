@@ -36,6 +36,18 @@ _*.py
 *_debug.html
 *_debug.png
 *.html.page*
+*.page[0-9]*
+# `--dump-html X.html --pages 1` writes exactly X.html, wherever X is. Any
+# HTML at the repo root, and any working directory of the kind live runs use,
+# is a capture rather than source: none is committed.
+/*.html
+live/
+out/
+output/
+runs/
+results/
+tmp/
+dumps/
 
 # --- captures kept for parser work ---------------------------------------
 # The smoke suite's fixtures are committed (trimmed, inside smoke_test.py);
@@ -96,7 +108,7 @@ secrets*
 # recoverable only because that repo was private at the time. On 2026-09-17
 # a sibling had an untracked `.env.bak` holding a 32-hex key in a PUBLIC
 # repository, one `git add -A` from publication. Craigslist was fixed then
-# and the fix never reached anyone else, which is §16's rule unapplied: when
+# and the fix never reached anyone else, which is the family's rule unapplied: when
 # you fix one, check the siblings.
 .env*
 !.env.example

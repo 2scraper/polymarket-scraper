@@ -17,11 +17,14 @@ Three things are different about this ENGINE:
 
 * **The bundled Chromium is old, and here it does not matter.** pyppeteer
   ships build 117.0.5938.0 — two years old — and because the User-Agent is
-  built from the browser's OWN version (§8: never a hardcoded literal), this
+  built from the browser's OWN version (never a hardcoded literal), this
   engine truthfully announces `Chrome/117`. On a sibling site that was the
   difference between data and exit 3. Polymarket was measured serving
-  `curl/8.0` the full page, so it is not reading the client at all, and
-  `--chromium-path` is a convenience here rather than a requirement.
+  `curl/8.0` the full page, so it is not reading the client at all. The
+  build's age matters for stability instead: on GitHub's runners its
+  renderer crashed on most event pages (2026-10-09 to 10-15), and the
+  canary therefore runs this engine with `--chromium-path` pointing at an
+  installed Chromium. Without the flag the bundled build is used.
 
 * **pyppeteer is effectively unmaintained** and its own README points at
   Playwright. It is here for parity and for anyone already committed to it.
@@ -57,7 +60,7 @@ from typing import List, Optional
 # that whole mechanism only works if importing this module actually requires
 # the driver. With the import hidden inside _Session.open(), the module
 # imports cleanly with no pyppeteer installed at all, the group never skips,
-# and CI cannot notice a broken import (§10).
+# and CI cannot notice a broken import.
 from pyppeteer import launch, connect
 
 from captcha_solver import (detect_recaptcha_v3, detect_recaptcha_in_page,
@@ -87,13 +90,36 @@ FIELD_FLOOR = 95
 # hung remote call ends the operation instead of the run. pyppeteer provides
 # no connect timeout of its own and its page methods' `timeout` option does
 # not cover a browser that has stopped answering at all.
-DEFAULT_OP_TIMEOUT = 120
+#
+# 30 s, down from 120. A page operation on a healthy browser returns in well
+# under a second; on 2026-10-15 the bundled Chromium's renderer went silent
+# on GitHub's runner for 3.5 minutes per attempt before reporting a crash,
+# and at 120 s per call that silence was spent in full on every evaluate().
+# A call that misses this bound now marks the browser as failed (see
+# _AsyncBridge.run), so the fetch relaunches instead of waiting.
+DEFAULT_OP_TIMEOUT = 30
+# Navigations carry their own 60 s timeout inside pyppeteer; the bridge's
+# bound sits above it so that one fires first and reads as a load timeout.
+NAV_OP_TIMEOUT = 90
 # 150, not 30, and kept identical to the Playwright engine's
 # CDP_CONNECT_TIMEOUT_MS — see its comment. Short version: the upgrade was
 # measured hanging 121s before the SERVER hung up, so 30s gives up while the
 # server is still working. It is NOT a cure for `profile_locked`, which was
 # observed with no timed-out connect in its history at all.
 CONNECT_TIMEOUT = 150
+
+# How often a waiting call looks up to check whether the browser has died
+# under it. See _AsyncBridge.run.
+_BROKEN_POLL_S = 0.25
+
+
+class BrowserGone(RuntimeError):
+    """The page crashed or the DevTools connection closed.
+
+    A failure of this engine's browser, not an answer from the site. Raised
+    instead of waiting out DEFAULT_OP_TIMEOUT on a target that will never
+    reply.
+    """
 
 
 class _AsyncBridge:
@@ -112,6 +138,11 @@ class _AsyncBridge:
     """
 
     def __init__(self):
+        # Set (from the loop thread) when the page crashes or the browser's
+        # DevTools connection closes; cleared when a fresh browser is
+        # launched. While it is set every call fails at once instead of
+        # waiting out its timeout.
+        self.broken: Optional[str] = None
         self.loop = asyncio.new_event_loop()
         self._thread = threading.Thread(target=self._serve, daemon=True,
                                         name="pyppeteer-loop")
@@ -148,14 +179,49 @@ class _AsyncBridge:
             return
         loop.default_exception_handler(context)
 
-    def run(self, coro, timeout: Optional[float] = DEFAULT_OP_TIMEOUT):
+    def run(self, coro, timeout: Optional[float] = DEFAULT_OP_TIMEOUT,
+            even_if_broken: bool = False):
+        """Run `coro` on the loop and wait for it, bounded two ways.
+
+        By `timeout`, as before, and by the browser dying under the call.
+        CI measured what happens without the second bound: pyppeteer's own
+        Chromium crashed its renderer ("Page crashed!") on an event page, and
+        every later call — content(), evaluate(), the next goto — waited its
+        full 120 s on a target that would never answer. One page took about
+        six minutes to fail, a run with retries hit the job's 30-minute
+        limit, and the eventual empty document was reported as a site block.
+
+        `even_if_broken` is for teardown: closing a browser whose page
+        crashed must still be attempted, or its process is leaked.
+        """
+        if self.broken and not even_if_broken:
+            coro.close()
+            raise BrowserGone(self.broken)
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
-        try:
-            return future.result(timeout)
-        except concurrent.futures.TimeoutError:
-            future.cancel()
-            raise TimeoutError(
-                f"pyppeteer call did not return within {timeout}s")
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while True:
+            try:
+                return future.result(_BROKEN_POLL_S)
+            except concurrent.futures.TimeoutError:
+                # On Python 3.11+ this is the builtin TimeoutError, which the
+                # coroutine itself may have raised. A FINISHED future is
+                # that, not this poll timing out, and is re-raised as is.
+                if future.done():
+                    raise
+                if self.broken and not even_if_broken:
+                    future.cancel()
+                    raise BrowserGone(self.broken)
+                if deadline is not None and time.monotonic() >= deadline:
+                    future.cancel()
+                    # A browser that does not answer within the bound is not
+                    # going to answer the next call either: mark it, so the
+                    # fetch loop relaunches rather than spending the bound
+                    # again on every remaining call.
+                    if not even_if_broken and not self.broken:
+                        self.broken = (f"the browser stopped answering (a "
+                                       f"call took over {timeout}s)")
+                    raise TimeoutError(
+                        f"pyppeteer call did not return within {timeout}s")
 
     def close(self):
         """Stop the loop, CANCELLING whatever it still has in flight.
@@ -192,6 +258,9 @@ class PageOutcome:
     products: List = field(default_factory=list)
     blocked_by: Optional[str] = None
     load_failed: bool = False
+    # Set when the BROWSER failed (a crashed page, a closed DevTools
+    # connection) rather than the site: such a page is a fetch failure.
+    browser_failure: Optional[str] = None
     state: Optional[str] = None
     # See the Playwright engine for why this is NOT a per-page counter.
     total_events: Optional[int] = None
@@ -232,7 +301,7 @@ def _install_turnstile_intercept(session) -> None:
     and chlPageData that live only inside that call. pyppeteer spells it
     `evaluateOnNewDocument`; the other two engines spell the same thing
     `context.add_init_script` and `Page.addScriptToEvaluateOnNewDocument`,
-    which is why this cannot live in the shared module (§1).
+    which is why this cannot live in the shared module.
 
     Harmless where there is no Turnstile — every page measured on this site
     so far — because it wraps a function that never appears and stops
@@ -253,7 +322,36 @@ class _Session:
         self.remote = bool(args.cdp_endpoint)
         self.browser = self.page = None
 
+    def _watch_for_death(self):
+        """Mark the bridge broken when THIS page crashes or THIS browser's
+        connection closes.
+
+        pyppeteer reports a renderer crash only as an 'error' event on the
+        page, and with no listener pyee raises it inside the websocket reader,
+        which is the traceback the CI logs carried. Bound to the handles that
+        were current at the time, so the old browser's 'disconnected', fired
+        while a relaunch tears it down, cannot poison its replacement.
+        """
+        browser, page = self.browser, self.page
+
+        def _page_error(error=None):
+            if page is self.page:
+                self.bridge.broken = f"the page crashed ({error})"
+
+        def _disconnected(*_):
+            if browser is self.browser:
+                self.bridge.broken = "the browser's DevTools connection closed"
+
+        try:
+            page.on("error", _page_error)
+            browser.on("disconnected", _disconnected)
+        except Exception as e:  # noqa: BLE001 — never break a run over this
+            logger.debug("Could not attach the crash watchers: %s", e)
+
     def open(self):
+        # A fresh browser is a fresh start: whatever killed the last one
+        # says nothing about this one.
+        self.bridge.broken = None
         if self.remote:
             logger.info("Connecting to an existing browser over CDP: %s",
                         _mask_credentials(self.args.cdp_endpoint))
@@ -267,6 +365,7 @@ class _Session:
                 timeout=getattr(self.args, "cdp_connect_timeout",
                                 CONNECT_TIMEOUT))
             self.page = self.bridge.run(self.browser.newPage())
+            self._watch_for_death()
             _install_turnstile_intercept(self)
             _watch_refusals(self)
             return self
@@ -299,6 +398,7 @@ class _Session:
                    handleSIGTERM=False, handleSIGHUP=False, **launch_kwargs),
             timeout=CONNECT_TIMEOUT * 2)
         self.page = self.bridge.run(self.browser.newPage())
+        self._watch_for_death()
         _install_turnstile_intercept(self)
         version = self.bridge.run(self.browser.version())
         self.bridge.run(self.page.setUserAgent(_chrome_ua(version)))
@@ -316,7 +416,8 @@ class _Session:
         if self.remote:
             return
         try:
-            self.bridge.run(self.browser.close(), timeout=30)
+            self.bridge.run(self.browser.close(), timeout=30,
+                            even_if_broken=True)
         except Exception as e:  # noqa: BLE001
             logger.debug("Ignoring error while closing browser: %s", e)
         self.open()
@@ -324,9 +425,11 @@ class _Session:
     def close(self):
         try:
             if self.remote:
-                self.bridge.run(self.page.close(), timeout=30)
+                self.bridge.run(self.page.close(), timeout=30,
+                                even_if_broken=True)
             else:
-                self.bridge.run(self.browser.close(), timeout=30)
+                self.bridge.run(self.browser.close(), timeout=30,
+                                even_if_broken=True)
         except Exception as e:  # noqa: BLE001
             logger.debug("Ignoring error during browser teardown: %s", e)
 
@@ -336,7 +439,7 @@ class _Session:
 # ---------------------------------------------------------------------------
 # Only "how to ask this driver" lives here. pyppeteer takes `() => expr` like
 # Playwright and unlike Selenium, which is exactly why page_flow names
-# operations rather than passing JavaScript across the boundary (§1).
+# operations rather than passing JavaScript across the boundary.
 def _count(session, selector: str) -> int:
     try:
         return len(session.bridge.run(session.page.querySelectorAll(selector)))
@@ -356,7 +459,7 @@ def _sleep(ms: int) -> None:
 # Any status at or above 400 on a request to this site's own host, and the
 # SAME threshold in all three engines — a threshold that differed between
 # them would mean one engine reporting `complete` where its twins report
-# `partial` on the identical run (§6).
+# `partial` on the identical run.
 _SITE_HOST_FRAGMENT = "polymarket.com"
 
 
@@ -382,9 +485,26 @@ def _refused_count(session) -> int:
     return getattr(session, "_refused", 0)
 
 
+# How long reading the document may take before the page counts as hung.
+# Serialising a 1 MB event page takes well under a second; in the canary of
+# 2026-10-15 pyppeteer's bundled Chromium instead went silent for 3.5 minutes
+# per attempt, its renderer pegged, before finally reporting "Page crashed!".
+# A page that cannot hand over its document in this long is treated as the
+# browser failing, so the fetch loop relaunches instead of waiting it out.
+CONTENT_TIMEOUT = 30
+
+
 def _content(session) -> Optional[str]:
     try:
-        return session.bridge.run(session.page.content())
+        return session.bridge.run(session.page.content(),
+                                  timeout=CONTENT_TIMEOUT)
+    except TimeoutError as e:
+        if not session.bridge.broken:
+            session.bridge.broken = (f"the page stopped answering "
+                                     f"(content() took over "
+                                     f"{CONTENT_TIMEOUT}s)")
+        logger.debug("content() timed out: %s", e)
+        return None
     except Exception as e:  # noqa: BLE001
         logger.debug("content() unavailable (page navigating?): %s", e)
         return None
@@ -424,7 +544,7 @@ def _min_matches(args, html: str = "") -> int:
 
 def _classify(session, html: str, status=None) -> str:
     # `status` POSITIONAL and second, matching the other two engines and the
-    # callee's real signature (§17).
+    # callee's real signature.
     return page_flow.classify(html, status, _current_url(session))
 
 
@@ -432,8 +552,21 @@ def _parse_for_mode(html: str, url: str, args, page_num: int = 1) -> List:
     return parse_markets(html, url, page=page_num, mode=args.mode)
 
 
-def handle_captcha_if_present(session, args) -> bool:
-    """Detect and solve a challenge. True if something was solved."""
+def handle_captcha_if_present(session, args,
+                              budget: "page_flow.SolveBudget") -> bool:
+    """Detect and solve a challenge. True if something was solved.
+
+    A browser that dies part-way through is reported as "nothing solved";
+    the fetch loop reads `session.bridge.broken` and treats the page as a
+    browser failure.
+    """
+    try:
+        return _handle_captcha(session, args, budget)
+    except BrowserGone:
+        return False
+
+
+def _handle_captcha(session, args, budget: "page_flow.SolveBudget") -> bool:
     html = _content(session)
     if html is None:
         return False
@@ -480,6 +613,14 @@ def handle_captcha_if_present(session, args) -> bool:
         logger.warning("No 2captcha API key, so this challenge cannot be "
                        "solved — continuing with whatever the page holds.")
         return False
+    # The page's allowance is checked HERE, immediately before the money is
+    # spent, so both call sites in _fetch_one_page and every block retry draw
+    # on the same one. See page_flow.SolveBudget.
+    if not budget.spend():
+        logger.warning("This page's solve allowance (%d) is spent — not "
+                       "buying another; continuing with whatever the page "
+                       "holds.", budget.limit)
+        return False
     try:
         token = solve_recaptcha(challenge, args.twocaptcha_key,
                                 api_version=args.captcha_api,
@@ -499,7 +640,8 @@ def handle_captcha_if_present(session, args) -> bool:
     _sleep(1500)
     try:
         session.bridge.run(session.page.reload(
-            {"waitUntil": "domcontentloaded", "timeout": 60000}))
+            {"waitUntil": "domcontentloaded", "timeout": 60000}),
+            timeout=NAV_OP_TIMEOUT)
     except Exception as e:  # noqa: BLE001
         logger.warning("Reload after the solve failed: %s", e)
     return True
@@ -544,7 +686,7 @@ def _fetch_one_page(session, args, pool, page_num: int,
     block_retries = 0 if not page_flow.RETRY_ON_BLOCKED else (
         args.proxy_block_retries if has_pool
         else page_flow.BLOCK_RETRIES_WITHOUT_POOL)
-    solves_bought = 0
+    budget = page_flow.SolveBudget()
     html, state, load_failed = None, "ok", False
 
     for block_attempt in range(block_retries + 1):
@@ -567,11 +709,15 @@ def _fetch_one_page(session, args, pool, page_num: int,
                 try:
                     session.bridge.run(session.page.goto(
                         url, {"waitUntil": "domcontentloaded",
-                              "timeout": 60000}))
+                              "timeout": 60000}), timeout=NAV_OP_TIMEOUT)
                     load_failed = False
                     break
                 except Exception as e:  # noqa: BLE001
                     load_failed = True
+                    if session.bridge.broken:
+                        # Re-navigating a crashed page or a closed
+                        # connection cannot succeed; only a new browser can.
+                        break
                     if attempt < args.retries:
                         pause = args.retry_delay * (2 ** (attempt - 1))
                         logger.warning("Timeout loading %s (attempt %d/%d: "
@@ -579,14 +725,14 @@ def _fetch_one_page(session, args, pool, page_num: int,
                                        attempt, args.retries, str(e)[:120],
                                        pause)
                         time.sleep(pause)
-        if load_failed:
+        if load_failed and not session.bridge.broken:
             break
 
-        if handle_captcha_if_present(session, args):
-            _sleep(1000)
-
-        html = _content(session) or ""
-        state = _classify(session, html)
+        if not session.bridge.broken:
+            if handle_captcha_if_present(session, args, budget):
+                _sleep(1000)
+            html = _content(session) or ""
+            state = _classify(session, html)
 
         if page_flow.is_unpainted(state, html):
             wait_timeout = page_flow.content_timeout_ms(args.mode)
@@ -601,9 +747,8 @@ def _fetch_one_page(session, args, pool, page_num: int,
             state = _classify(session, html)
 
         if (page_flow.should_solve(state)
-                and solves_bought < page_flow.SOLVES_PER_PAGE):
-            solves_bought += 1
-            if handle_captcha_if_present(session, args):
+                and budget.allows()):
+            if handle_captcha_if_present(session, args, budget):
                 _sleep(1000)
                 html = _content(session) or html
                 state = _classify(session, html)
@@ -614,6 +759,24 @@ def _fetch_one_page(session, args, pool, page_num: int,
                     logger.warning("The solve was NOT accepted: page %d is "
                                    "still %s. The purchase is spent.",
                                    page_num, state)
+
+        if session.bridge.broken:
+            # The browser died under the fetch. Whatever document is left is
+            # not an answer from the site, so this must not be classified:
+            # `classify(None)` says "blocked", which is how a renderer crash
+            # used to come out as exit 3 with advice to raise --delay.
+            outcome.browser_failure = session.bridge.broken
+            load_failed = True
+            if not session.remote and block_attempt < block_retries:
+                logger.warning(
+                    "Page %d: %s. That is this engine's browser failing, not "
+                    "the site refusing — relaunching it and fetching again "
+                    "(%d/%d).", page_num, session.bridge.broken,
+                    block_attempt + 1, block_retries)
+                session.relaunch()
+                continue
+            break
+        outcome.browser_failure = None
 
         if not page_flow.should_retry(state):
             break
@@ -629,13 +792,13 @@ def _fetch_one_page(session, args, pool, page_num: int,
                 session.relaunch()
                 time.sleep(pause)
             else:
-                # No pool, so nowhere else to go. What DOES clear it here is
-                # a FRESH browser context: 9 of 27 first attempts were
-                # challenged and all 9 were served on the next attempt in a
-                # new context, while waiting inside the same context cleared
-                # none. `page_flow.RETRY_NEEDS_FRESH_CONTEXT` says so, and a
+                # No pool, so nowhere else to go. What has cleared a
+                # challenge on sibling sites is a FRESH browser context rather
+                # than a reload; nothing was refused on this site while it
+                # was measured, so that is the family's rule, not a figure
+                # from here. `page_flow.RETRY_NEEDS_FRESH_CONTEXT` says so, and a
                 # constant no engine consulted would be dead policy dressed
-                # up as enforcement (§17).
+                # up as enforcement.
                 #
                 # NOT relaunched over --cdp-endpoint: a Scraping Browser
                 # profile allows one live connection, so reconnecting risks
@@ -646,7 +809,7 @@ def _fetch_one_page(session, args, pool, page_num: int,
                                "re-fetching %s (%d/%d).",
                                page_num, state, pause,
                                "in a FRESH browser context, which is what "
-                               "clears this site's challenge" if fresh
+                               "clears a challenge on sibling sites (not measured on this one)" if fresh
                                else "through the same access path",
                                block_attempt + 1, block_retries)
                 time.sleep(pause)
@@ -660,7 +823,17 @@ def _fetch_one_page(session, args, pool, page_num: int,
                 break
 
     if load_failed:
-        logger.error("Gave up loading %s after %d attempt(s).", url, args.retries)
+        if outcome.browser_failure:
+            logger.error(
+                "Gave up on %s: %s, and a fresh browser did not get past it. "
+                "Nothing was read from the site, so this is a fetch failure "
+                "(exit 5), not a block. pyppeteer's own bundled Chromium is "
+                "old; --chromium-path pointing at an installed Chrome or "
+                "Chromium is the first thing to try.",
+                url, outcome.browser_failure)
+        else:
+            logger.error("Gave up loading %s after %d attempt(s).", url,
+                         args.retries)
         outcome.load_failed = True
         return outcome
 
@@ -701,7 +874,7 @@ def _fetch_one_page(session, args, pool, page_num: int,
         # THE FAST PATH, and the normal one: the page's own payload has
         # arrived, so there is nothing to wait for and nothing to scroll.
         # Identical to the other two engines by construction — the test for
-        # it lives in page_flow (§6).
+        # it lives in page_flow.
         #
         # Gated on the payload ARRIVING rather than on it naming markets: a
         # payload that arrived with none is an answer, and spending the
@@ -779,8 +952,21 @@ def _fetch_one_page(session, args, pool, page_num: int,
         debug_html = f"{args.out}_page{page_num}_debug.html"
         with open(debug_html, "w", encoding="utf-8") as f:
             f.write(html or "")
-        logger.warning("0 rows parsed — saved what the browser actually saw "
-                       "to %s.", debug_html)
+        if page_flow.parsed_nothing_from_a_served_page(html, len(products)):
+            # A page the site SERVED, linking to events, that parses to zero
+            # rows is this parser's failure and not an empty listing; the
+            # state is what scrape() turns into its stop reason.
+            outcome.state = page_flow.PARSER_FOUND_NOTHING
+            logger.error(
+                "0 rows parsed from a page the site SERVED, which links to "
+                "%d event(s). That is a parser regression rather than an "
+                "empty listing: the payload shape or the tile markup has "
+                "changed. Saved what the browser saw to %s — please open an "
+                "issue with it attached.",
+                page_flow.count_cards(html or ""), debug_html)
+        else:
+            logger.warning("0 rows parsed — saved what the browser actually "
+                           "saw to %s.", debug_html)
 
     outcome.products = products
     outcome.final_url = _current_url(session)
@@ -803,7 +989,7 @@ def scrape(args) -> int:
                        "the remote browser has its own exit.")
         pool = None
 
-    # Two shapes of pagination, and the MODE picks which (§7). In
+    # Two shapes of pagination, and the MODE picks which. In
     # --mode events page 1 is the LISTING and pages 2..N are the event pages
     # page 1 named — real independent addresses, but knowable only from page
     # 1's own data, which is why they are planned from `event_urls_from`
@@ -819,7 +1005,7 @@ def scrape(args) -> int:
                            page_flow.concurrency_refusal(args.url, args.mode))
         else:
             # A DOCUMENTED ENGINE LIMIT, in the same class as this family's
-            # "Selenium cannot authenticate a remote CDP endpoint" (§6): the
+            # "Selenium cannot authenticate a remote CDP endpoint": the
             # worker pool is implemented in the Playwright engine only. Said
             # out loud rather than run as one worker quietly, which would
             # look like the flag did something.
@@ -836,13 +1022,21 @@ def scrape(args) -> int:
         outcomes.append(first)
 
         if not first.ok:
-            stop_reason = ("page_load_timeout" if first.load_failed
-                           else f"blocked_{first.blocked_by}")
+            stop_reason = page_flow.failure_stop_reason(first)
             blocked = first.blocked_by is not None
+
+
+        elif first.state == page_flow.PARSER_FOUND_NOTHING:
+
+            # Served, links to events, and nothing parsed: a parser failure,
+
+            # reported as one (exit 5) rather than as an empty listing (exit 4).
+
+            stop_reason = page_flow.PARSER_FOUND_NOTHING
 
         elif plans_pages:
             seen_keys.update(p.sku for p in first.products if p.sku is not None)
-            # VERIFY before planning (§7). A search `?q=x` can land on the
+            # VERIFY before planning. A search `?q=x` can land on the
             # TAG listing `/predictions/x`, which is a different set of
             # events — and page 1's event URLs would then belong to that
             # other listing rather than to the one this run asked for.
@@ -872,8 +1066,7 @@ def scrape(args) -> int:
                 outcome = _fetch_one_page(session, args, pool, page_num, url)
                 outcomes.append(outcome)
                 if not outcome.ok:
-                    stop_reason = ("page_load_timeout" if outcome.load_failed
-                                   else f"blocked_{outcome.blocked_by}")
+                    stop_reason = page_flow.failure_stop_reason(outcome)
                     blocked = outcome.blocked_by is not None
                     break
                 seen_keys.update(p.sku for p in outcome.products
@@ -901,7 +1094,7 @@ def scrape(args) -> int:
 
         else:
             seen_keys.update(p.sku for p in first.products if p.sku is not None)
-            # ONE page, and the run is COMPLETE holding it. §7's warning read
+            # ONE page, and the run is COMPLETE holding it. the family's warning read
             # from the other side: the single page is DELIBERATE, stated in
             # the log with the measurement behind it and recorded in the
             # sidecar as its own stop reason, so it can never be confused
@@ -918,7 +1111,7 @@ def scrape(args) -> int:
     # Merged in PAGE order, with a DEEPER reading of a market replacing a
     # shallower one in place — see output_writer.merge_pages. Identical to
     # the other two engines by construction, because the rule lives there
-    # rather than being written out three times (§6).
+    # rather than being written out three times.
     all_rows, fresh_by_batch, upgraded_by_page = merge_pages(
         [(o.page_num, o.products) for o in outcomes], key="sku")
     for page_num in sorted(fresh_by_batch):
@@ -983,7 +1176,7 @@ def scrape(args) -> int:
         "locale": locale_of(final_url),
         # Byte-identical to the other two engines. A sidecar key that
         # differed between them would make two runs of the same URL look
-        # like two different pagination models (§6).
+        # like two different pagination models.
         "pagination": ("listing+event-pages" if args.mode == "events"
                        else "single-page"),
     }
@@ -1048,12 +1241,14 @@ def parse_args():
                    help="Output file prefix")
     p.add_argument("--chromium-path", default=None, metavar="PATH",
                    help="Use the browser at PATH instead of pyppeteer's own "
-                        "Chromium. A convenience on this site rather than a "
-                        "requirement: polymarket.com was measured serving a "
-                        "plain `curl/8.0` the full page, so a two-year-old "
-                        "bundled Chromium is served too. e.g. "
+                        "Chromium (build 117). Unset, the bundled build is "
+                        "used as before. The site serves that build, but on "
+                        "GitHub's runners its renderer crashed on most event "
+                        "pages (2026-10-09 to 10-15) while a current "
+                        "Chromium read them, so the canary passes this flag. "
+                        "e.g. /usr/bin/chromium, /usr/bin/google-chrome or "
                         "'/Applications/Google Chrome.app/Contents/MacOS/"
-                        "Google Chrome' or /usr/bin/google-chrome.")
+                        "Google Chrome'.")
     p.add_argument("--proxy", default=None,
                    help="Proxy URL. Credentials are sent over CDP "
                         "(page.authenticate), never on the command line.")
@@ -1081,7 +1276,7 @@ def parse_args():
                         "the Challenge-page form. No challenge was met on "
                         "this site while it was written, so the path is "
                         "unexercised HERE — which is not a claim about what "
-                        "a solver can do (§19). A page carrying no widget is "
+                        "a solver can do. A page carrying no widget is "
                         "reported unsolved rather than charged for.")
     p.add_argument("--min-score", type=float, default=0.7,
                    help="reCAPTCHA v3 minimum score (0.3, 0.7 or 0.9).")
@@ -1104,7 +1299,7 @@ def parse_args():
                    help="Save the exact HTML the parser is given, on success "
                         "as well as failure.")
     # HEADLESS by default, and that is this site's own measurement rather
-    # than the family's habit. §19 says to measure headless against headful
+    # than the family's habit. the family rule says to measure headless against headful
     # once per site because a sibling repo found 0 of 4 against 4 of 4; here
     # the answer came back IDENTICAL — 20 events, the same twenty, on both.
     # The site also served a `curl/8.0` User-Agent the full 791,003 bytes,

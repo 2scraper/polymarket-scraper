@@ -3,7 +3,7 @@
 # GitHub's description, topics and homepage are the first thing anyone reads,
 # and they are the one surface the offline suite could not see: it scans
 # FILES, and a description lives behind an API. That gap is not hypothetical.
-# This repo's description shipped carrying the very wording §12 bans for the
+# This repo's description shipped carrying the very wording the family rule bans for the
 # Scraping Browser API, copied out of the family template, and it was caught
 # by hand minutes before the repo went public rather than by any check. The
 # same wording reached other public repos in this family for the same reason.

@@ -12,7 +12,7 @@ name: canary
 #   1. `--mode events` over a category listing, 4 pages — the listing itself
 #      plus three of the event pages it named. This is the ONLY multi-page
 #      path in the repo, and with a single page a dead page walk is invisible
-#      (§11). It also exercises the merge that replaces a shallow listing row
+#      in CI. It also exercises the merge that replaces a shallow listing row
 #      with the deeper reading from its own event page, and the columns only
 #      an event page publishes: `condition_id`, `clob_token_ids`, `spread`.
 #
@@ -35,22 +35,20 @@ name: canary
 #
 # It goes through the ENVIRONMENT rather than a commented-out --proxy line,
 # because env_config.py already reads exactly that variable, a credential
-# must never reach a command line (§3), and an unset secret arrives as an
+# must never reach a command line, and an unset secret arrives as an
 # empty string which the loader treats as "not configured". One line is
 # correct with and without it.
 #
-# WHAT FAILS THE BADGE AND WHAT ONLY WARNS
-# ----------------------------------------
-# A block (exit 3) WARNS. Nothing refused this scraper while it was written,
-# so a refusal here says something about the runner's address rather than
-# about this code, and a check that is always red teaches everyone to ignore
-# checks. But a warning must not read as a pass: every warning path also
-# writes to the step summary saying in words that the canary did not test
-# anything today.
-#
-# Parsing zero rows from a page the site plainly served (exit 4), or a
-# coverage floor being missed, DOES fail — that is the regression this exists
-# to catch.
+# WHAT FAILS THE BADGE
+# --------------------
+# Anything that means the site was not actually tested today: a block
+# (exit 3), content never obtained (exit 5 — a navigation timeout, a crashed
+# browser, a served page this parser read nothing from), zero rows (exit 4),
+# a missing or timed-out engine in the cross-engine job, or a row or field
+# floor being missed. This site served a bare GitHub runner on every
+# scheduled run measured, so a green badge must mean "rows were read today",
+# never "nothing was tried". A partial deep walk (exit 6) only warns, and the
+# sanity checks below still run on what it gathered.
 
 on:
   schedule:
@@ -102,8 +100,11 @@ jobs:
           case "${{ steps.deep.outputs.exit_code }}" in
             0) echo "::notice::Event walk complete." ;;
             3)
-              echo "::warning::Blocked before parsing (exit 3) from a bare GitHub runner. Nothing refused this scraper from a datacentre address while it was written, so this says something about the runner rather than about this code — but it also means the site-side check did NOT happen today."
-              echo "A runner address was refused. The parser was not exercised. Set a \`POLYMARKET_PROXY\` secret to give this canary an exit whose request rate it controls; a block would then fail the job, which is the point." >> "$GITHUB_STEP_SUMMARY" ;;
+              echo "::error::Blocked before parsing (exit 3). The site was NOT tested today. This site served bare GitHub runners on every earlier scheduled run, so a refusal is news; the debug HTML is in the artefacts. A POLYMARKET_PROXY secret, if set, is used for the request."
+              exit 1 ;;
+            5)
+              echo "::error::The content was never obtained (exit 5): a navigation timeout, a crashed browser, or a served page this parser read nothing from (stop_reason parser_found_nothing). The log says which."
+              exit 1 ;;
             4)
               echo "::error::Ran fine and parsed 0 rows (exit 4) from a listing that normally holds twenty events and about seventy markets. The inlined payload (self.__next_f.push) or the tile markup has most likely moved — this is exactly the regression this canary exists to catch. The HTML dump in the artefacts tells you which."
               exit 1 ;;
@@ -127,7 +128,7 @@ jobs:
 
           # THE PAGINATION CHECK. --mode events is the only multi-page path
           # here, and a walk that quietly fetched one page and reported
-          # success is the family's most expensive bug (§7).
+          # success is the family's most expensive bug.
           if meta["status"] == "complete" and meta["pages_completed"] < 4:
               fail.append("status complete but only %d of 4 pages"
                           % meta["pages_completed"])
@@ -168,7 +169,7 @@ jobs:
 
           # `position` restarts at 1 on every page, so the column is
           # worthless without `page` beside it — and a page number that was
-          # never threaded through is invisible to every other check (§18).
+          # never threaded through is invisible to every other check.
           pairs = {(r.get("page"), r.get("position")) for r in rows}
           if len(pairs) != len(rows):
               fail.append("page+position is not unique across the run")
@@ -199,8 +200,11 @@ jobs:
           case "${{ steps.listing.outputs.exit_code }}" in
             0) echo "::notice::Listing run complete." ;;
             3)
-              echo "::warning::Blocked before parsing (exit 3) on the listing run."
-              echo "The listing run was refused; the shallow path was not exercised today." >> "$GITHUB_STEP_SUMMARY" ;;
+              echo "::error::Blocked before parsing (exit 3) on the listing run; the shallow path was not tested today."
+              exit 1 ;;
+            5)
+              echo "::error::The listing was never obtained (exit 5); see the log for whether the browser, the navigation or the parser failed."
+              exit 1 ;;
             4)
               echo "::error::0 rows from /predictions, which renders twenty events. The payload read has broken."
               exit 1 ;;
@@ -294,7 +298,11 @@ jobs:
   # market does not change by trading.
   cross-engine:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Three engines at up to 10 minutes each (see `timeout 600` below) plus
+    # three installs. Before the per-engine cap, one hung pyppeteer run used
+    # the whole 30 minutes and the job was CANCELLED, which reads as nobody's
+    # fault rather than as the engine that hung.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -334,7 +342,10 @@ jobs:
           code=$?
           set -e
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
-          if [ "$code" != "0" ]; then exit 0; fi
+          if [ "$code" != "0" ]; then
+            echo "::error::The listing that picks the event page exited $code, so no engine was compared today."
+            exit 1
+          fi
           url=$(python -c "
           import json
           rows = json.load(open('cross_listing.json'))
@@ -342,6 +353,10 @@ jobs:
               if r.get('event_url'):
                   print(r['event_url']); break
           ")
+          if [ -z "$url" ]; then
+            echo "::error::The listing named no event URL to compare on."
+            exit 1
+          fi
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "picked $url"
 
@@ -356,20 +371,40 @@ jobs:
           # worth a check that can fail.
           #
           # `set +e`: a refused engine must not stop its twins, and the
-          # comparison step decides what a missing run means.
+          # comparison step decides what a missing run means. `timeout 600`
+          # caps each engine, so one that hangs is reported by name (exit
+          # 124, no output) instead of cancelling the whole job.
           set +e
-          .venv-playwright/bin/python playwright_scraper.py \
+          timeout 600 .venv-playwright/bin/python playwright_scraper.py \
             --url "${{ steps.pick.outputs.url }}" \
             --mode event --format json --out cross_playwright
           echo "playwright_scraper.py exited $?"
-          .venv-selenium/bin/python selenium_scraper.py \
+          timeout 600 .venv-selenium/bin/python selenium_scraper.py \
             --url "${{ steps.pick.outputs.url }}" \
             --mode event --format json --out cross_selenium
           echo "selenium_scraper.py exited $?"
-          .venv-puppeteer/bin/python puppeteer_scraper.py \
-            --url "${{ steps.pick.outputs.url }}" \
-            --mode event --format json --out cross_puppeteer
-          echo "puppeteer_scraper.py exited $?"
+          # pyppeteer gets an installed Chromium through --chromium-path,
+          # not its own download. Its bundled build (117) crashed its
+          # renderer on most event pages on GitHub's runners (2026-10-09 to
+          # 10-15), so the job was testing that old build rather than the
+          # engine's code. The browser used is the Chromium the step above
+          # installed for Playwright. If it cannot be found the engine is
+          # not run, and the comparison below fails on the missing output.
+          chromium=$(.venv-playwright/bin/python -c "
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p:
+              print(p.chromium.executable_path)
+          ")
+          if [ -z "$chromium" ] || [ ! -x "$chromium" ]; then
+            echo "::error::No installed Chromium found for puppeteer_scraper.py --chromium-path."
+          else
+            echo "puppeteer_scraper.py uses $chromium"
+            timeout 600 .venv-puppeteer/bin/python puppeteer_scraper.py \
+              --url "${{ steps.pick.outputs.url }}" \
+              --mode event --format json --out cross_puppeteer \
+              --chromium-path "$chromium"
+            echo "puppeteer_scraper.py exited $?"
+          fi
           exit 0
 
       - name: The three must agree on ids and schema
@@ -407,23 +442,23 @@ jobs:
                   continue
               runs[engine] = json.loads(path.read_text())
 
-          # A run that was refused says something about this runner's
-          # address, not about the engine. Warn in words rather than failing
-          # the badge — but never let the warning read as a pass.
-          if missing:
-              summary = ("%s produced no rows; the cross-engine comparison "
-                         "did NOT run for %s today."
-                         % (", ".join(missing), ", ".join(missing)))
-              print("::warning::" + summary)
-              with open("%s" % __import__("os").environ["GITHUB_STEP_SUMMARY"],
-                        "a") as fh:
-                  fh.write("### cross-engine canary\n\n" + summary + "\n")
-          if len(runs) < 2:
-              print("fewer than two engines returned rows — nothing to "
-                    "compare. Not a pass.")
-              raise SystemExit(0)
-
+          # Every engine the README promises must have read the page. An
+          # engine that produced nothing was NOT tested, and a skipped engine
+          # is not a passing one: this used to warn and go green, and the
+          # pyppeteer engine went untested on most days without the badge
+          # changing colour.
           fail = []
+          for engine in missing:
+              fail.append("%s produced no rows (see its exit code in the "
+                          "previous step's log)" % engine)
+          for engine, rows in runs.items():
+              if not rows:
+                  fail.append("%s wrote an empty file" % engine)
+          if len(runs) < 2:
+              for f in fail:
+                  print("::error::" + f)
+              raise SystemExit(1)
+
           base = ENGINES[0] if ENGINES[0] in runs else sorted(runs)[0]
           base_rows = {r["sku"]: r for r in runs[base]}
 

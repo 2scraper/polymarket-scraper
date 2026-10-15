@@ -277,7 +277,7 @@ and geography, not access**:
 | **fingerprint** API | a consistent device identity across runs (`--fingerprint`) | fetched, applied (UA, locale `en-US`, timezone `America/New_York`), 70 markets |
 
 Every one of those was run end to end against this site rather than assumed
-(CLAUDE.md §16: the credential-gated paths are the ones nobody runs). They
+because the paths a credential gates are the ones nobody runs. They
 all return **the same 70 markets** a local browser does, which is the useful
 finding: on this site the paid products buy convenience and geography, and
 none of them buys data you could not already get.
@@ -336,8 +336,13 @@ A page carrying no widget is reported unsolved rather than charged for, and
 |---|---|
 | `playwright_scraper.py` | **primary.** The only one with the worker pool for `--mode events`. `playwright install chromium` is enough here — the bundled Chromium was served every page tried. |
 | `selenium_scraper.py` | parity. Cannot authenticate a proxy (`--proxy-server` has nowhere to put a password) and cannot attach to an authenticated CDP endpoint. |
-| `puppeteer_scraper.py` | parity, via pyppeteer. Downloads its own Chromium (build 117.0.5938.0, two years old) and announces `Chrome/117` truthfully; this site does not care. `--chromium-path` points it elsewhere. |
+| `puppeteer_scraper.py` | parity, via pyppeteer. Downloads its own Chromium (build 117.0.5938.0, two years old). On GitHub's runners that build's renderer crashed on most event pages in the daily cross-engine canary (2026-10-09 to 10-15); a crash is now reported as a browser failure (exit 5), not as a block. `--chromium-path PATH` runs the engine on an installed Chrome or Chromium instead (without it, the bundled build is used as before). On 2026-10-15 Chromium 153 and 154 read the same event page through this engine, and the canary now passes the flag with the Chromium that Playwright installs. |
 | `scraper_api_client.py` | no browser at all — one HTTP request per page through 2Captcha's Scraper API. |
+
+Flags not every engine takes: `--browser-channel` is Playwright-only,
+`--cdp-connect-timeout` is not in Selenium (it cannot attach to an
+authenticated endpoint anyway), and `--fingerprint`, `--fp-country`,
+`--fp-tags` and `--locale` are in Playwright and Selenium but not pyppeteer.
 
 Install **one** engine: playwright and pyppeteer declare mutually
 unsatisfiable pins, and pyppeteer and selenium collide on `urllib3`.
@@ -392,7 +397,9 @@ picked up, without printing secrets.
 * **A run that finds nothing writes nothing.** Last night's good output is
   never replaced by an empty file; `--allow-empty` is the opt-out.
 * **Exit codes**: `0` ok · `1` crash · `2` bad usage · `3` blocked · `4` zero
-  rows · `5` remote API error · `6` partial.
+  rows · `5` the content was never obtained (a remote API error, a navigation
+  timeout, the engine's own browser crashing, or a served page this parser
+  read nothing from) · `6` partial.
 * **`<out>.meta.json`** per run: status, stop reason, which pages failed by
   number, which event pages held no markets (`pages_without_rows`), the
   site's own `total_events`, the row counts per page, and the category and
@@ -432,6 +439,10 @@ reprices continuously, so what must match is which markets were found, what
 the columns are called, and every field a market does not change by trading.
 Measured 2026-10-09 on one event page: the same five markets, the same forty
 columns, and `scraped_at` the only field that differed between engines.
+
+The pyppeteer run in that job uses `--chromium-path` with the Chromium the
+job installs for Playwright, because pyppeteer's own build 117 crashed on the
+runners. The flag is optional everywhere else.
 
 ---
 

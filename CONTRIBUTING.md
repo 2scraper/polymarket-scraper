@@ -177,7 +177,7 @@ will fail rather than silently regress:
   pipeline branches on these. And a scroll that produced nothing new is
   `complete` only when nothing behind it was refused — otherwise it is
   `partial`, because a throttled run reporting "complete" is the failure
-  §7 exists to prevent.
+  the family rule exists to prevent.
 
 Two more that are about the fixtures rather than the code:
 

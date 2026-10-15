@@ -10,6 +10,22 @@ from a row count, it leads the section in a blockquote.
 
 ## [Unreleased]
 
+> **Behaviour changes (2026-10-14 audit):**
+> - A run whose browser died under it — pyppeteer's renderer crashing, a
+>   closed DevTools connection — now exits **5** with `stop_reason:
+>   browser_failed`. It used to wait out a 120 s timeout per call (about six
+>   minutes per page), then classify the empty document as a site block and
+>   exit **3** with advice to raise `--delay`.
+> - A page the site served, linking to events, that parses to zero rows now
+>   ends page 1 with `stop_reason: parser_found_nothing` and exit **5** in
+>   every engine. It used to exit **4**, "genuinely empty".
+> - CSV cells beginning with `=`, `+`, `-`, `@`, tab, CR or LF get a leading
+>   apostrophe in the CSV (JSON is unchanged), counted as `csv_cells_escaped`
+>   in the sidecar.
+> - `scraper_api_client.py --retries -1` is now a usage error (exit 2).
+> - The canary fails on a block, a fetch failure or a missing engine instead
+>   of warning and going green.
+
 > **Behaviour change:** `--retries 0` is now a usage error (exit 2). It used
 > to be accepted and made the page-load loop unreachable, so nothing was
 > fetched and the engine reported the browser's own blank page as a result:
@@ -26,6 +42,54 @@ from a row count, it leads the section in a blockquote.
   `page_flow.attempts` in every entry point; a check reads the source of each
   one and calls the validator, so a new engine declaring the flag with a
   plain int fails the suite.
+- **One page could buy five captcha solves against a limit of one.** The
+  captcha handler runs twice per fetch attempt and only the second call was
+  counted, while the first repeated on every block retry. Measured with the
+  solver stubbed: 5 solves per page in all three engines (4 with a two-exit
+  pool). Every purchase now draws on one `page_flow.SolveBudget` per page,
+  checked immediately before the solver is called and not reset by a retry,
+  a relaunch or a rotation: 1 solve in every engine, with and without a pool.
+- **A crashed pyppeteer page was reported as a site block after six
+  minutes.** The daily cross-engine canary showed pyppeteer's bundled
+  Chromium 117 crashing its renderer ("Page crashed!") on event pages on most
+  days from 2026-10-09; reproduced locally on 2026-10-15. Each later call
+  then waited its full 120 s, the run printed "The site did not serve this
+  request" and exited 3, and on 2026-10-14 the job hit its 30-minute limit.
+  The engine now listens for the page's crash and the browser's disconnect,
+  ends any call in flight within a quarter of a second, relaunches the
+  browser within the block-retry budget, and reports a browser that never
+  recovered as exit 5. On the page that reproduced it, the run recovered on
+  its third browser in 24 s and returned 77 markets; the previous code was
+  still waiting three minutes in. On GitHub's runner the renderer instead
+  went silent for 3.5 minutes before crashing, so every pyppeteer call is
+  now bounded at 30 s (90 s for a navigation, above pyppeteer's own 60 s)
+  instead of 120 s, and a call that misses its bound counts as the browser
+  failing. The Playwright and Selenium engines get the
+  same treatment for a renderer crash or a lost session.
+- **The cross-engine canary was testing pyppeteer's old Chromium, not the
+  engine.** It now runs `puppeteer_scraper.py` with `--chromium-path` set
+  to the Chromium the job installs for Playwright. Locally on 2026-10-15,
+  Chromium 153 and 154 both read an event page through this engine (exit 0,
+  every row priced). The flag already existed, and with it unset the bundled
+  build is still used. Its `--help` text no longer calls it merely a
+  convenience.
+- **A served page that parsed to nothing exited 4.** The Playwright engine
+  detected it but nothing read the result, and the other two did not detect
+  it at all.
+- **The credential scan read nothing from a clone under a directory called
+  `venv`.** Its exclusions were matched against the absolute path. They are
+  matched relative to the repository now, and a scan that read zero files
+  fails instead of reporting "nothing credential-shaped".
+- **Donor wording.** The Selenium and pyppeteer retry log said a fresh
+  context "is what clears this site's challenge", and a comment cited "9 of 27
+  first attempts"; nothing was ever refused on this site. Both now say it is
+  the family's rule. The README no longer says pyppeteer's Chromium is fine
+  here, and lists the flags not every engine takes.
+- Root-level `*.html`, `*.pageN` and `live/`/`out/`-style working directories
+  are ignored, so a `--dump-html` capture cannot reach a commit; the duplicate
+  inline sample check in `tests.yml` is gone in favour of
+  `.github/ci_checks.py --sample-check`; public files no longer cite private
+  documents or their section numbers.
 
 ## [0.2.0] — 2026-10-09
 
@@ -295,7 +359,7 @@ the condition the other mistook for the end of a walk.
   from a planted fault.
 
 - **The repo is public**, and the published surfaces are now checkable. Its
-  GitHub description had shipped carrying the wording §12 bans for the
+  GitHub description had shipped carrying the wording the family rule bans for the
   Scraping Browser API, straight out of the family template — caught by hand
   minutes before publishing, because the suite scans FILES and a description
   lives behind an API. `.github/repo-metadata.yml` now holds the intended
@@ -312,14 +376,14 @@ the condition the other mistook for the end of a walk.
   from the site, 21 `captcha` / 16 extension scripts / 1 `cf-turnstile` over
   the Scraping Browser. All eleven previous fixtures came from a local
   browser or curl, so the marker checks would have passed with
-  `cf-turnstile` in the set; now they do not (§21).
+  `cf-turnstile` in the set; now they do not.
 
 - **A README section on the container**, which the repo shipped and
   documented nowhere. Measured rather than described: the image is 1.34 GB,
   its entrypoint answers `--help`, a run inside it returns the same 70
   markets a local browser does, and it carries no `.env`, no test suite and
   no fixtures. CI has built it on every PR from the start; this is the first
-  time it was built and RUN by hand (§16).
+  time it was built and RUN by hand.
 
 ### Fixed
 
@@ -384,7 +448,7 @@ were injected; six were caught immediately and two were not.
 > cut, adding a paragraph about the credential-gated paths. A released
 > section is history — `git show v0.1.0:CHANGELOG.md` is what a reader can
 > check it against — so it has been restored verbatim and the paragraph moved
-> here, where it belongs (§19).
+> here, where it belongs.
 
 ### Fixed
 
@@ -417,24 +481,24 @@ were injected; six were caught immediately and two were not.
   paragraph keeps after the site's name has been swapped out — `stor(ies)`,
   `claps`, `day archive`, `parse_posts`. Each was counted across the repo
   before being banned, so a word that occurs legitimately here is not in the
-  list (§18).
+  list.
 - **A check that every field `diff_runs.py` tracks is a real column**, which
   is the check that would have caught the first defect above.
 - **A page+position check that spans TWO pages.** The existing one only ever
   saw page 1, so it passed happily on a parser that hardcoded `page = 1` —
-  which is §18's arithmetic bug, where 60 of 119 rows silently claimed a
+  which is the family's arithmetic bug, where 60 of 119 rows silently claimed a
   position another row already had. Proven by making that change and
   watching the new check fire.
 
 ### Measured, 2026-09-16
 
-- **every credential-gated path was run end to end** (§16), and all of them
+- **every credential-gated path was run end to end**, and all of them
   return the same 70 markets a local browser does: the Scraper API at
   $0.0005 for 766,857 bytes in 11s, the Scraping Browser over CDP, and a
   fingerprint fetched and applied (user agent, locale `en-US`, timezone
   `America/New_York`). The Fingerprint API's documented multi-tag example is
   rejected with HTTP 400 and this repo's default is the single `Windows` tag
-  that works — the §17 defect that made `--fingerprint` inert in four
+  that works — the defect that made `--fingerprint` inert in four
   sibling repos is not present here.
 
 ## [0.1.0] — 2026-09-16
@@ -496,7 +560,7 @@ From one datacentre address in Finland, headless, no proxy and no key:
 
 ### Fixed during the rebuild
 
-Each of these was found by running the thing rather than by reading it (§15):
+Each of these was found by running the thing rather than by reading it:
 
 - **An event page parsed to zero rows** when its payload shipped no event
   object. The scanner tracked a brace stack through the RSC stream, and the

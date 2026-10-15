@@ -77,7 +77,7 @@ CREDENTIAL_ALLOWED = (
     # pasted while debugging. An allowlist entry would have switched the
     # check off exactly there. A sibling repo's copy of this script FAILED ON
     # ITS OWN MAIN for the opposite reason: its fixtures were neither
-    # allowlisted nor written this way (§17).
+    # allowlisted nor written this way.
     "{login}", "{user}", "password}@", "***", "u:p@h",
     "login:password@host:port",     # the shape a refusal message prints
     "user:secret@",                 # the proxy-pool masking fixtures
@@ -115,7 +115,7 @@ SCANNED_SUFFIXES = (".py", ".md", ".txt", ".yml", ".yaml", ".example")
 # into pip's vendored code and flags a 32-hex string in `_elffile.py` as
 # key-shaped. Correct about the string, wrong about the file — and it is the
 # FIRST thing a new user sees from `python3 smoke_test.py`. A guard people
-# have to argue with is one they learn to suppress (CLAUDE.md §22).
+# have to argue with is one they learn to suppress.
 #
 # Deliberately NOT a narrowing of what gets scanned: an untracked file is
 # still read, because a key pasted into a scratch file beside the scripts is
@@ -146,8 +146,12 @@ def scanned_files():
     for path in sorted(REPO.rglob("*")):
         if not path.is_file() or path.suffix not in SCANNED_SUFFIXES:
             continue
+        # RELATIVE to the repo: `path.parts` of an absolute path includes
+        # every ancestor, so a clone that happens to live under a directory
+        # called `venv` was skipped whole and reported "0 files scanned,
+        # nothing credential-shaped".
         if any(part in {".git", "__pycache__", ".venv", "venv"}
-               for part in path.parts):
+               for part in path.relative_to(REPO).parts):
             continue
         if _is_in_virtualenv(path):
             continue
@@ -239,6 +243,11 @@ def secret_check():
                 failed.append(f"{rel}:{lineno} contains {match[:6]}… — a "
                               f"32-char hex string, the shape of a 2captcha key")
 
+    if not scanned:
+        # A scan that read nothing has checked nothing, and must not read
+        # as clean.
+        failed.append("0 files scanned — the scan excluded the whole tree, "
+                      "so nothing was checked")
     if not failed:
         print(f"ok       {scanned} files scanned, nothing credential-shaped")
     return failed

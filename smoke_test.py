@@ -30,7 +30,7 @@ a sibling. The ones worth knowing about before you change anything:
     event page and the EVENT's on a listing — `volume_scope` says which, and
     reading the wrong one fills the column completely and wrongly.
 
-  * `test_markers_do_not_match_a_good_page` is the §18 rule as a test. A
+  * `test_markers_do_not_match_a_good_page` is the family rule as a test. A
     marker that matches every page is worse than no marker, so every marker
     in every set is asserted ABSENT from every page known to be good — and
     `cf-turnstile` is kept out of the set because 2Captcha's own auto-solve
@@ -129,7 +129,7 @@ SHARED_MODULES = {"page_flow": page_flow, "product_parser": product_parser}
 # Ten fixtures cut from pages Polymarket actually served — five listings
 # across three routes and two locales, and five event pages including a
 # sports fixture and the one whose payload ships no event object at all.
-# Every marker check below asserts its markers are ABSENT from all ten (§18).
+# Every marker check below asserts its markers are ABSENT from all ten.
 GOOD_PAGES = ("listing", "listing_tag", "listing_search", "listing_dash",
               "listing_es", "event_multi", "event_single", "event_sports",
               "event_es", "event_no_object")
@@ -236,7 +236,7 @@ def test_payload_decoding():
     # stack to empty there, lost every object start after it, and returned no
     # rows at all for a page whose market sat in plain text in the payload.
     # Twelve captures did not show it; the thirteenth did, on the first live
-    # run of --mode events (§15).
+    # run of --mode events.
     rows = rows_of("event_no_object")
     ok &= check("an event page whose payload has no event object still parses",
                 len(rows) == 1)
@@ -259,7 +259,7 @@ def test_payload_decoding():
 
 
 def test_values_on_real_fixtures():
-    group("VALUES on real captures, not coverage (§10)")
+    group("VALUES on real captures, not coverage")
     ok = True
 
     # A column can be 100% populated and entirely wrong. These are the exact
@@ -301,7 +301,7 @@ def test_values_on_real_fixtures():
 
     # The same five markets in Spanish. THE IDS AND THE PRICES ARE
     # IDENTICAL and only the words move — which is why every join in this
-    # repo is on an id (§20).
+    # repo is on an id.
     spanish = by_sku("event_es")
     other = spanish.get(key)
     ok &= check("the same market is the same sku under /es/", other is not None)
@@ -371,7 +371,7 @@ def test_values_on_real_fixtures():
 
 
 def test_the_three_read_paths():
-    group("Three views of the same markets, in order (§4)")
+    group("Three views of the same markets, in order")
     ok = True
 
     rows = rows_of("listing")
@@ -386,7 +386,7 @@ def test_the_three_read_paths():
     # The ItemList publishes ONE price per event and does not say which
     # market it belongs to. On a sports event it was the LEADING side while
     # the first market was 0.0, so the check is "is it among this event's
-    # prices" rather than "does it equal the first one" (§4).
+    # prices" rather than "does it equal the first one".
     prices = product_parser.jsonld_prices(fixture("listing"))
     ok &= check("jsonld_prices is keyed by event slug", bool(prices))
     ok &= check("...and carries the currency beside the price",
@@ -423,16 +423,16 @@ def test_the_three_read_paths():
 
     # There is deliberately NO overlay: the tile's percentage and the
     # payload's first price are two DIFFERENT MARKETS of one event, not two
-    # views of one price (§4).
+    # views of one price.
     ok &= check("no DOM overlay is applied to a payload row",
                 all(r.data_source != "flight+dom" for r in rows))
     return ok
 
 
 def test_the_page_number_is_threaded_through():
-    group("page + position, across MORE THAN ONE page (§18)")
+    group("page + position, across MORE THAN ONE page")
     ok = True
-    # §18's arithmetic bug, as a check. `position` restarts at 1 on every
+    # The family's arithmetic bug, as a check. `position` restarts at 1 on every
     # page, so without `page` beside it a row from page 2 claims a position
     # another row already has — and on a sibling repo 60 of 119 rows did.
     #
@@ -468,7 +468,7 @@ def test_event_pages_are_scoped_to_their_event():
     # its related-events rail too. The Fed page carried twenty-five market
     # objects for its five markets and a single-market event carried
     # twenty-one. Emitting those would report four other events' prices as
-    # this event's own — §4's junk-link data theft with no junk link in it.
+    # this event's own — the family's junk-link data theft with no junk link in it.
     for name, expected in (("event_multi", 5), ("event_single", 1),
                            ("event_sports", 3), ("event_no_object", 1)):
         rows = rows_of(name)
@@ -484,7 +484,7 @@ def test_event_pages_are_scoped_to_their_event():
 
 
 def test_unsupported_urls_are_refused():
-    group("Refusing a URL WITH the reason (§5)")
+    group("Refusing a URL WITH the reason")
     ok = True
     reason = unsupported_reason("https://polymarket.us/event/anything")
     ok &= check("polymarket.us is refused", bool(reason))
@@ -590,7 +590,7 @@ def test_urls():
 
 
 def test_pagination():
-    group("A listing has ONE page, and that is the measurement (§7)")
+    group("A listing has ONE page, and that is the measurement")
     ok = True
     ok &= check("PAGINATES_BY_URL is False", PAGINATES_BY_URL is False)
     ok &= check("...and the reason names what was tried",
@@ -601,7 +601,7 @@ def test_pagination():
     # Returning a constructed `?page=2` would be WORSE than nothing: the site
     # answers it with HTTP 200 and page 1, so a run that trusted it would
     # find no new sku, call the listing exhausted, and report a COMPLETE run
-    # holding one page (§18).
+    # holding one page.
     ok &= check("...and None for every page after it",
                 all(page_url("https://polymarket.com/predictions", n) is None
                     for n in (2, 3, 40)))
@@ -663,7 +663,7 @@ def test_pagination():
 
 
 def test_page_state():
-    group("Five states, and the ORDER the checks run in (§17)")
+    group("Five states, and the ORDER the checks run in")
     ok = True
     for name in ("listing", "listing_tag", "listing_search", "listing_dash",
                  "listing_es", "event_multi", "event_single", "event_sports",
@@ -673,7 +673,7 @@ def test_page_state():
 
     # The site's own 404, under a real HTTP 404. A correct answer to a wrong
     # URL, and NOT a block: exit 4 is "ran fine, found nothing", which is
-    # exactly what happened (§8).
+    # exactly what happened.
     ok &= check("a missing event is `empty`, not `blocked`",
                 detect_page_state(fixture("not_found"), 404,
                                   URLS["not_found"]) == "empty")
@@ -719,7 +719,7 @@ def test_page_state():
     # CHROMIUM'S OWN ERROR PAGE, captured through a dead proxy. It carries
     # `<title>polymarket.com</title>` — the SITE'S OWN HOSTNAME — no vendor
     # marker of any kind, and ERR_PROXY_CONNECTION_FAILED in a div that no
-    # marker list would know. A title check calls it a real page (§18).
+    # marker list would know. A title check calls it a real page.
     ok &= check("Chromium's own error page is `blocked`",
                 detect_page_state(fixture("proxy_error"), None,
                                   URLS["proxy_error"]) == "blocked")
@@ -742,7 +742,7 @@ def test_page_state():
 
 
 def test_markers_do_not_match_a_good_page():
-    group("A marker that fires on a good page is worse than no marker (§18)")
+    group("A marker that fires on a good page is worse than no marker")
     ok = True
     good = [fixture(n) for n in GOOD_PAGES]
     for vendor, markers in BOT_CHALLENGE_MARKERS.items():
@@ -768,7 +768,7 @@ def test_markers_do_not_match_a_good_page():
     # A marker must survive BOTH encodings of the same page: an edge can
     # entity-escape the punctuation for an HTTP client and serve it plain to
     # a browser, and a literal marker then matches the browser and silently
-    # misses the client (§20).
+    # misses the client.
     escaped = ("<html><body>Just a moment&#8230; "
                "https&#58;&#47;&#47;challenges&#46;cloudflare&#46;com/turnstile"
                "</body></html>")
@@ -786,7 +786,7 @@ def test_markers_do_not_match_a_good_page():
 
 
 def test_the_scraping_browser_injects_a_captcha_and_it_is_not_the_sites():
-    group("Whose captcha markup is it? (§18, §21)")
+    group("Whose captcha markup is it?")
     ok = True
     # MEASURED ON THIS SITE, not inherited. The same URL, fetched twice
     # within a minute on 2026-09-16:
@@ -827,7 +827,7 @@ def test_the_scraping_browser_injects_a_captcha_and_it_is_not_the_sites():
     ok &= check("...and its markets parse",
                 len(rows_of("cdp_extension")) >= 5)
 
-    # The site's own configuration, asked the way §18 asks it: not "did we
+    # The site's own configuration, asked the way the family rule asks it: not "did we
     # meet a captcha" but "is one configured, and would we see it?" Counted
     # with the extension's own scripts removed, so the answer is about
     # polymarket.com rather than about our tooling.
@@ -844,7 +844,7 @@ def test_the_scraping_browser_injects_a_captcha_and_it_is_not_the_sites():
 
 
 def test_the_solver_is_not_declared_useless():
-    group("What may be said about a captcha here (§19)")
+    group("What may be said about a captcha here")
     ok = True
     # THE MOST EXPENSIVE SHAPE OF ERROR THIS FAMILY CAN PRODUCE is a sentence
     # that tells a reader a 2Captcha key would not help. No test fails, no
@@ -954,7 +954,7 @@ def test_page_flow_policy():
                 page_flow.should_parse("nonsense") is False)
 
     group("Retrying a block DOES help here — and the engines CONSULT that")
-    # A policy constant nothing reads is the same defect as dead code (§17).
+    # A policy constant nothing reads is the same defect as dead code.
     ok &= check("RETRY_ON_BLOCKED is True on this site",
                 page_flow.RETRY_ON_BLOCKED is True)
     ok &= check("the budget is non-zero", page_flow.BLOCK_RETRIES_WITHOUT_POOL > 0)
@@ -967,7 +967,7 @@ def test_page_flow_policy():
     ok &= check("every engine reads RETRY_ON_BLOCKED", all(consulted))
 
     group("Readiness — a count poll, never an evaluated string")
-    ok &= check("MIN_CARD_MATCHES is above 1 (§5)", page_flow.MIN_CARD_MATCHES > 1)
+    ok &= check("MIN_CARD_MATCHES is above 1", page_flow.MIN_CARD_MATCHES > 1)
     ok &= check("the anchor is the event link itself, in every mode",
                 all(page_flow.ready_selector(m) == SELECTORS["item_card"]
                     for m in ("markets", "events", "event")))
@@ -1017,7 +1017,7 @@ def test_page_flow_policy():
 
 
 def test_scroll_loop():
-    group("The scroll — the WINDOW, and THREE stable rounds (§8)")
+    group("The scroll — the WINDOW, and THREE stable rounds")
     ok = True
     # The opposite of a sibling repo, whose body never scrolled. Here the
     # window is what moves, and every engine must scroll to the document's
@@ -1095,7 +1095,7 @@ def test_scroll_loop():
 
 
 def test_one_page_is_complete_not_partial():
-    group("One page is a COMPLETE answer to this URL (§7, from both sides)")
+    group("One page is a COMPLETE answer to this URL (from both sides)")
     ok = True
     # The family's most expensive bug was a dead next-page selector: one page
     # of three, exit 0, nobody noticed for months. The defence here cannot be
@@ -1267,7 +1267,7 @@ def test_writes_are_atomic():
 
 
 def test_output_contract():
-    group("The output contract (§9)")
+    group("The output contract")
     ok = True
     ok &= check("every mode yields the same row class",
                 set(ROW_CLASS_BY_MODE.values()) == {Market})
@@ -1283,11 +1283,11 @@ def test_output_contract():
     ok &= check("source defaults to the main host, never to an empty string",
                 SOURCE_DEFAULT == "polymarket.com"
                 and Market().source == SOURCE_DEFAULT)
-    # The family prefix, byte-identical and in order across six repos (§9).
+    # The family prefix, byte-identical and in order across six repos.
     ok &= check("the family prefix leads the schema, in order",
                 [f.name for f in fields(Market)][:5]
                 == ["source", "scraped_at", "url", "sku", "title"])
-    # A column that is null on every row of every run should not exist (§9).
+    # A column that is null on every row of every run should not exist.
     # These are the ones this repo dropped, with the reason in
     # output_writer's docstring.
     absent = {"brand", "original_price", "discount_pct", "rating", "in_stock",
@@ -1408,7 +1408,7 @@ def test_writers_and_finish_run():
         ok &= check("empty and not blocked is exit 4", code == EXIT_NO_PRODUCTS)
 
         # THE DISTINCTION A LIVE DEAD PROXY FOUND. Zero rows has three
-        # causes and they are not the same thing (§8: blocked is not empty).
+        # causes and they are not the same thing (blocked is not empty).
         # This one used to return exit 4 — "ran fine, found nothing" — on a
         # run that never reached the site at all, while the sidecar beside
         # it correctly said `status: failed`, `pages_completed: 0`. A
@@ -1476,7 +1476,7 @@ def test_diff():
     # which is a column here — so `diff_runs.py` compared eight fields absent
     # from every row of both runs and reported "no changes" for ever. Nothing
     # failed, because the checks below exercise the diff's MECHANICS with
-    # hand-built rows and never ask whether its subject is real (§16).
+    # hand-built rows and never ask whether its subject is real.
     columns = {f.name for f in fields(Market)}
     import diff_runs as _diff
     unreal = sorted(set(_diff.TRACKED_FIELDS) - columns)
@@ -1606,7 +1606,7 @@ def test_env_config():
     ok &= check("every .env.example name is read by the code",
                 documented <= set(env_config.ENV_KEYS))
 
-    group("A COPIED .env.example must read as unset (§17)")
+    group("A COPIED .env.example must read as unset")
     # `cp .env.example .env` followed by a run used to connect with the
     # literal string `{login}-zone-...` as a username and get a 401 — the
     # confusing auth error a long way from its cause that this rule exists to
@@ -1624,7 +1624,7 @@ def test_env_config():
                 # documents them, so a literal-only placeholder list misses
                 # both — `cp .env.example .env` then connected with the
                 # string `{login}-zone-...` as a username and got a 401 a
-                # long way from its cause (§17).
+                # long way from its cause.
                 for name in ("TWOCAPTCHA_KEY", "POLYMARKET_CDP_ENDPOINT",
                              "POLYMARKET_PROXY"):
                     ok &= check(f"{name} from a copied example reads as unset",
@@ -1644,7 +1644,7 @@ def test_env_config():
 
 
 def test_fingerprint_is_read_through_the_shared_helper():
-    group("--fingerprint reads the UA through ONE helper (§16)")
+    group("--fingerprint reads the UA through ONE helper")
     ok = True
     # The defect this pins was live in FOUR sibling repos at once and was
     # live here too, in the Selenium engine, until a live call to the API
@@ -1679,7 +1679,7 @@ def test_fingerprint_is_read_through_the_shared_helper():
     ok &= check("nothing recognisable -> None, never a fabricated UA",
                 fingerprint_user_agent({"userAgent": {}}) is None)
 
-    group("Its kwargs are ones the driver actually accepts (§10)")
+    group("Its kwargs are ones the driver actually accepts")
     # An unknown key in new_context(**kwargs) is a TypeError at launch, on
     # the paid path, at runtime.
     fp = {"userAgent": {"userAgent": "UA"},
@@ -1720,7 +1720,7 @@ def test_fingerprint_cache_is_key_aware():
     # key "deadbeef"*4 returned fingerprint 5393493 off disk and raised
     # nothing, because a REAL key had cached the same parameters earlier. A
     # user whose fingerprint subscription lapsed would see --fingerprint keep
-    # working on their own machine and 401 on a fresh one — §16's "a path
+    # working on their own machine and 401 on a fresh one — the family's "a path
     # that looks like it works", in the one place this family has already
     # been bitten five times.
     ok &= check("two keys do not share a cache entry", a != b)
@@ -1732,7 +1732,7 @@ def test_fingerprint_cache_is_key_aware():
     ok &= check("the key never reaches the filename",
                 "key-one" not in a and len(pathlib.Path(a).stem) == 16)
     # And the caller must actually pass it — a key-aware helper nobody hands
-    # a key to is the §17 defect this family names dead policy.
+    # a key to is the defect this family names dead policy.
     src = open(os.path.join(REPO_ROOT, "fingerprint_client.py"),
                encoding="utf-8").read()
     ok &= check("get_fingerprint passes the key to the cache path",
@@ -1765,7 +1765,7 @@ def test_proxy_pool():
 
 
 def test_credentials_never_reach_a_log():
-    group("An EXCEPTION MESSAGE is a log (§8)")
+    group("An EXCEPTION MESSAGE is a log")
     ok = True
     secret = "hunter2"
     # Concatenated rather than interpolated, so no line in this file holds a
@@ -1804,7 +1804,7 @@ def test_credentials_never_reach_a_log():
 def test_driver_primitives_tolerate_a_navigation():
     group("Every driver primitive survives the page moving under it")
     ok = True
-    # The canary's FIRST dispatch caught this, which is exactly why §15 says
+    # The canary's FIRST dispatch caught this, which is exactly why the family rule says
     # to dispatch it once rather than trusting the badge. A scroll batch was
     # polling the card count when the page navigated — Cloudflare's challenge
     # can arrive at any moment here — and one engine raised
@@ -1855,7 +1855,7 @@ def test_driver_primitives_tolerate_a_navigation():
 
 
 def test_concurrency_machinery(skips):
-    """§10: drive the worker pool with the browser stubbed out.
+    """Drive the worker pool with the browser stubbed out.
 
     A live run cannot always reach this. Page 1 is fetched alone and its
     answer decides whether the rest may be addressed, so a blocked page 1
@@ -1944,7 +1944,7 @@ def test_concurrency_machinery(skips):
     ok &= check("the end-of-listing event did not fire", not exhausted)
 
     # 2. Outcomes come back in ARRIVAL order and must be restorable to PAGE
-    #    order — §8's "merge in page order, not arrival order". With workers
+    #    order — the family's "merge in page order, not arrival order". With workers
     #    the two genuinely differ.
     ordered = sorted(results, key=lambda o: o.page_num)
     ok &= check("outcomes carry their page number",
@@ -2023,7 +2023,7 @@ def test_concurrency_machinery(skips):
 
 
 def test_engine_parity(skips):
-    group("The three engines agree — flags, in BOTH directions (§17)")
+    group("The three engines agree — flags, in BOTH directions")
     ok = True
     flagsets = {}
     sources = {}
@@ -2057,7 +2057,7 @@ def test_engine_parity(skips):
             ok &= check("...from page 1's own outcome, not the merged rows",
                         "o.page_num == 1" in body and "all_rows" not in body)
 
-    # The family contract (§9). Every engine must carry all of these.
+    # The family contract. Every engine must carry all of these.
     contract = {"--url", "--pages", "--category", "--format", "--out", "--delay",
                 "--retries", "--retry-delay", "--concurrency", "--proxy",
                 "--proxy-file", "--proxy-rotate", "--proxy-shuffle",
@@ -2089,7 +2089,7 @@ def test_engine_parity(skips):
         ok &= check(f"{engine}'s extra flags are exactly the documented set",
                     actual == extra)
 
-    group("Every shared-module call binds against the real signature (§17)")
+    group("Every shared-module call binds against the real signature")
     problems = []
     for engine in ENGINES:
         path = os.path.join(REPO_ROOT, f"{engine}.py")
@@ -2128,7 +2128,7 @@ def test_engine_parity(skips):
     ok &= check(f"no call site disagrees with its callee "
                 f"{'' if not problems else problems[:3]}", not problems)
 
-    group("Every engine imports its driver at MODULE level (§10)")
+    group("Every engine imports its driver at MODULE level")
     # Without this the module imports cleanly with no driver installed, the
     # skip below never fires, and CI's engine-smoke job cannot notice a
     # broken import.
@@ -2198,7 +2198,7 @@ def test_engine_parity(skips):
 
 
 def test_module_attributes_exist(skips):
-    group("Every `module.name` an engine reaches for actually exists (§17)")
+    group("Every `module.name` an engine reaches for actually exists")
     ok = True
     # The gap the signature-binding check leaves, found by a live run rather
     # than by reading. `_min_matches` in one engine called
@@ -2386,9 +2386,9 @@ def test_tree_scanners_skip_virtualenvs():
 
 
 def test_no_dead_public_names():
-    group("Every public name in the policy modules has a reader (§17)")
+    group("Every public name in the policy modules has a reader")
     ok = True
-    # §17's check 5, automated. A public name nothing reads is dead code, and
+    # The family's check 5, automated. A public name nothing reads is dead code, and
     # a policy CONSTANT nothing reads is worse: the prose beside it reads
     # like enforcement. A sibling repo shipped `RETRY_ON_BLOCKED` with a
     # paragraph of measured justification and no engine consulting it.
@@ -2451,7 +2451,7 @@ def test_no_dead_public_names():
 
 
 def test_no_undefined_names():
-    group("Names that resolve, not just parse (§10)")
+    group("Names that resolve, not just parse")
     # `compileall` proves a file PARSES, not that its names RESOLVE. A live
     # run of a sibling repo's engine died with NameError on a line reached
     # only while fetching, after an import had been removed — invisible to
@@ -2506,7 +2506,7 @@ def _undefined_names(path):
 
 
 def test_dockerfile_matches_its_entrypoint():
-    group("The Dockerfile COPY list against the import graph (§10)")
+    group("The Dockerfile COPY list against the import graph")
     # All three repos in this family once shipped an image that died with
     # ModuleNotFoundError on every invocation, --help included, because one
     # module was missing from an explicit COPY list. This check needs no
@@ -2583,7 +2583,7 @@ def test_dockerfile_matches_its_entrypoint():
 
 
 def test_no_file_describes_another_site():
-    group("No shipped file still describes a different site (§17)")
+    group("No shipped file still describes a different site")
     ok = True
     # A sibling repo's audit found "a shipped file still described another
     # site", and this repo inherited the same thing FOUR times over: a
@@ -2624,7 +2624,7 @@ def test_no_file_describes_another_site():
         # — columns that do not exist here — while every check stayed green.
         #
         # Every word below was COUNTED across this repo before being banned
-        # (§18: a marker that matches a page you know is good is worse than
+        # (a marker that matches a page you know is good is worse than
         # no marker). Words that DO occur legitimately here — "answer",
         # "publication", "subtitle" — are deliberately absent from this list.
         "stor(ies)": "a sibling's row",
@@ -2641,7 +2641,7 @@ def test_no_file_describes_another_site():
         "listing_kind": "a sibling's URL classifier",
     }
     # A CONTEXT allowlist, the same shape ci_checks.py uses for credentials,
-    # because one of these words is legitimate in exactly one place. §8 says
+    # because one of these words is legitimate in exactly one place. the family rule says
     # captcha DETECTION stays broad — which challenge a visitor meets depends
     # on the exit and on what the address has been doing — so
     # `BOT_CHALLENGE_MARKERS` names vendors this site has never served, on
@@ -2700,7 +2700,7 @@ def test_no_file_describes_another_site():
 
 
 def test_wording():
-    group("Wording enforced by a test (§12)")
+    group("Wording enforced by a test")
     ok = True
     banned = {
         "cloud browser": "Scraping Browser API",
@@ -2714,7 +2714,7 @@ def test_wording():
     # until the day the repo went public, so `.github/` — the workflows, the
     # issue templates and the repo-metadata file below — was never checked at
     # all. Widened after the banned phrase turned up on a surface no check
-    # could see (§21).
+    # could see.
     shipped = [path for path in sorted(pathlib.Path(REPO_ROOT).rglob("*"))
                if path.is_file()
                and path.suffix in (".py", ".md", ".txt", ".toml", ".yml",
@@ -2731,7 +2731,7 @@ def test_wording():
             ok &= check(f"{name}: no {phrase!r} (write {instead!r})",
                         phrase.lower() not in text)
 
-    group("What the repo publishes about ITSELF (§2, §21)")
+    group("What the repo publishes about ITSELF")
     # A description, topics and a homepage are the first thing anyone reads
     # and the one surface a file-scanning suite cannot reach. Keeping the
     # intended values in a FILE is what puts them back in reach — the checks
@@ -2771,7 +2771,7 @@ def test_wording():
 
 
 def test_no_capture_leaks():
-    group("Committed fixtures carry no credential-shaped material (§10)")
+    group("Committed fixtures carry no credential-shaped material")
     ok = True
     text = open(_FIXTURE_PATH, encoding="utf-8").read()
 
@@ -2821,7 +2821,7 @@ def test_no_capture_leaks():
 
 
 def test_ci_checks_is_wired_up():
-    group("One credential check, invoked from CI and from here (§17)")
+    group("One credential check, invoked from CI and from here")
     ok = True
     script = os.path.join(REPO_ROOT, ".github", "ci_checks.py")
     ok &= check("ci_checks.py exists", os.path.exists(script))
@@ -2946,14 +2946,14 @@ def test_readme_claims():
                 "no account" in readme.lower() or "without an account" in readme.lower())
     ok &= check("measurements carry a date", "2026-09-16" in readme)
 
-    # THE SENTENCE THIS FAMILY GOT WRONG ONCE (§19): what may be said about a
+    # THE SENTENCE THIS FAMILY GOT WRONG ONCE: what may be said about a
     # captcha is what THIS REPO implements, never what a solver can do.
     ok &= check("it names the task types this repo implements",
                 "TurnstileTaskProxyless" in readme)
     ok &= check("...and says no challenge was met, rather than that none can be",
                 "no challenge" in readme.lower())
 
-    group("The README's numbers match the artefacts on disk (§17)")
+    group("The README's numbers match the artefacts on disk")
     # Re-derived from the committed fixtures rather than retyped, so a claim
     # that goes stale fails here rather than in a reader's terminal.
     listing = rows_of("listing")
@@ -2988,7 +2988,7 @@ def test_readme_claims():
 
     group("What the paid products are said to buy")
     # None of them is needed to READ this site, and saying so is the
-    # positioning §13 asks for: state plainly when the paid path is
+    # positioning the family rule asks for: state plainly when the paid path is
     # unnecessary, then list what it actually buys.
     ok &= check("the README names the four 2Captcha products",
                 all(term in readme for term in
@@ -3000,7 +3000,7 @@ def test_readme_claims():
 
 # A FLOOR on how many checks must run, and deliberately not a number this
 # repo states anywhere else. The exact count goes stale the next time anyone
-# adds a check, and a stale count in a README is worse than no count (§13) —
+# adds a check, and a stale count in a README is worse than no count —
 # so the README says nothing about it and this constant exists only to catch
 # checks DISAPPEARING. It came in from a sibling repo at 650 against 648 here,
 # which is the same rot in miniature: an inherited number is not a measured
@@ -3148,6 +3148,492 @@ def test_retries_is_validated_in_every_entry_point():
     return check("--retries is validated in every entry point, so 0 is a usage error", not problems)
 
 
+# ---------------------------------------------------------------------------
+# Audit of 2026-10-14: budget, dead browser, parser failure, CSV formulas
+# ---------------------------------------------------------------------------
+def _stub_engine_for_a_challenge(eng, calls):
+    """Point an engine's helpers at a page that stays a challenge, with the
+    solver replaced by a counter. Returns a restore() callable."""
+    import types
+    saved = {}
+
+    def put(name, value):
+        if hasattr(eng, name):
+            saved[name] = getattr(eng, name)
+            setattr(eng, name, value)
+
+    challenge = types.SimpleNamespace(
+        kind="reCAPTCHA v2", source="html", sitekey="k", action=None,
+        is_turnstile=False, solved_user_agent=None)
+    put("solve_recaptcha", lambda *a, **k: calls.append(1) or "tok")
+    put("reconcile_detections", lambda *a, **k: challenge)
+    put("detect_recaptcha_v3", lambda *a, **k: None)
+    put("detect_recaptcha_in_page", lambda *a, **k: None)
+    put("_classify", lambda *a, **k: "challenge")
+    put("_content", lambda *a, **k: "<html>challenge</html>")
+    put("_content_when_settled", lambda *a, **k: "<html>challenge</html>")
+    put("_count", lambda *a, **k: 0)
+    put("_sleep", lambda *a, **k: None)
+    put("_current_url", lambda *a, **k: "https://polymarket.com/predictions")
+
+    def restore():
+        for name, value in saved.items():
+            setattr(eng, name, value)
+    return restore
+
+
+class _StubArgs:
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+    def __getattr__(self, name):
+        return None
+
+
+def _stub_args(out):
+    return _StubArgs(retries=1, retry_delay=0, pages=1, mode="markets",
+                     proxy_block_retries=3, cdp_endpoint=None, headless=True,
+                     out=out, dump_html=None, solve_captcha="when-blocked",
+                     twocaptcha_key="stub-never-sent", captcha_api="v2",
+                     min_score=0.3, chromium_path=None)
+
+
+def test_one_solve_allowance_per_page(skips):
+    group("One paid solve per page, across both call sites and every retry")
+    ok = True
+    from unittest import mock
+
+    # As TEXT first, so it runs with no engine library installed: the
+    # function that calls the solver claims from the budget BEFORE it, and
+    # every call into the captcha handler passes one.
+    for engine in ENGINES:
+        tree = ast.parse(_engine_source(engine))
+        claim_before_buy = False
+        for fn in ast.walk(tree):
+            if not isinstance(fn, ast.FunctionDef):
+                continue
+            buys = [n.lineno for n in ast.walk(fn) if isinstance(n, ast.Call)
+                    and getattr(n.func, "id", "") == "solve_recaptcha"]
+            if not buys:
+                continue
+            claims = [n.lineno for n in ast.walk(fn) if isinstance(n, ast.Call)
+                      and getattr(n.func, "attr", "") == "spend"]
+            claim_before_buy = bool(claims) and min(claims) < min(buys)
+        ok &= check(f"{engine}: the solver is called only after "
+                    f"budget.spend()", claim_before_buy)
+        handler_calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+                         and getattr(n.func, "id", "")
+                         == "handle_captcha_if_present"]
+        ok &= check(f"{engine}: both captcha call sites pass the page's "
+                    f"budget", len(handler_calls) >= 2 and all(
+                        len(c.args) == 3 for c in handler_calls))
+
+    # And as BEHAVIOUR, driving the real _fetch_one_page with the solver
+    # stubbed and a page that never stops being a challenge. Before the fix
+    # each engine bought 5 solves here against a limit of 1.
+    for engine in ENGINES:
+        try:
+            eng = __import__(engine)
+        except ImportError as e:
+            skips.append(f"{engine} ({e})")
+            continue
+        for with_pool in (False, True):
+            calls = []
+            restore = _stub_engine_for_a_challenge(eng, calls)
+            try:
+                with tempfile.TemporaryDirectory() as tmp:
+                    session = mock.MagicMock()
+                    session.page.url = "https://polymarket.com/predictions"
+                    session.bridge.broken = None
+                    session.browser_failure = None
+                    pool = None
+                    if with_pool:
+                        pool = mock.MagicMock()
+                        pool.__len__.return_value = 2
+                        pool.current = "http://exit:1"
+                    eng._fetch_one_page(session, _stub_args(
+                        os.path.join(tmp, "o")), pool, 1,
+                        "https://polymarket.com/predictions")
+            finally:
+                restore()
+            ok &= check(f"{engine} ({'pool' if with_pool else 'no pool'}): "
+                        f"{len(calls)} solve(s) bought for one page, limit "
+                        f"{page_flow.SOLVES_PER_PAGE}",
+                        len(calls) == page_flow.SOLVES_PER_PAGE)
+    return ok
+
+
+def test_a_dead_browser_is_not_a_block(skips):
+    group("A crashed page or closed connection is a fetch failure, not a block")
+    ok = True
+    import types
+    from unittest import mock
+
+    def outcome(**kw):
+        base = dict(load_failed=False, browser_failure=None, blocked_by=None,
+                    state="content")
+        base.update(kw)
+        return types.SimpleNamespace(**base)
+
+    ok &= check("a dead browser stops as browser_failed",
+                page_flow.failure_stop_reason(outcome(
+                    load_failed=True, browser_failure="the page crashed"))
+                == "browser_failed")
+    ok &= check("a navigation that never completed stays page_load_timeout",
+                page_flow.failure_stop_reason(outcome(load_failed=True))
+                == "page_load_timeout")
+    ok &= check("a served page that parsed nothing is parser_found_nothing",
+                page_flow.failure_stop_reason(outcome(
+                    state=page_flow.PARSER_FOUND_NOTHING))
+                == page_flow.PARSER_FOUND_NOTHING)
+    ok &= check("a refusal is still blocked_<vendor>",
+                page_flow.failure_stop_reason(outcome(
+                    blocked_by="not-served", state="blocked"))
+                == "blocked_not-served")
+    with tempfile.TemporaryDirectory() as tmp:
+        for reason in ("browser_failed", page_flow.PARSER_FOUND_NOTHING):
+            rc = finish_run([], os.path.join(tmp, "o"), "json", False,
+                            blocked=False, stop_reason=reason,
+                            pages_requested=1, pages_completed=0,
+                            start_url="u", final_url="u")
+            ok &= check(f"0 rows with {reason} exits 5, not 3 or 4",
+                        rc == EXIT_FETCH_FAILED)
+
+    # Each engine's real _fetch_one_page, with the browser reported dead
+    # after the navigation: it must come back load_failed with the reason,
+    # and never classify what is left as a block.
+    for engine in ENGINES:
+        try:
+            eng = __import__(engine)
+        except ImportError as e:
+            skips.append(f"{engine} ({e})")
+            continue
+        calls = []
+        restore = _stub_engine_for_a_challenge(eng, calls)
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                session = mock.MagicMock()
+                session.remote = False
+                session.page.url = "https://polymarket.com/predictions"
+                session.bridge.broken = "the page crashed (stub)"
+                session.browser_failure = "the page crashed (stub)"
+                got = eng._fetch_one_page(session, _stub_args(
+                    os.path.join(tmp, "o")), None, 1,
+                    "https://polymarket.com/predictions")
+        finally:
+            restore()
+        ok &= check(f"{engine}: a dead browser is load_failed, not blocked",
+                    got.load_failed and got.blocked_by is None)
+        ok &= check(f"{engine}: ...with the reason recorded",
+                    bool(got.browser_failure))
+        ok &= check(f"{engine}: ...and stops as browser_failed",
+                    page_flow.failure_stop_reason(got) == "browser_failed")
+        ok &= check(f"{engine}: ...after relaunching, not waiting it out",
+                    session.relaunch.call_count
+                    == page_flow.BLOCK_RETRIES_WITHOUT_POOL)
+
+    # The pyppeteer bridge itself: a call in flight when the page crashes
+    # must end at once, not after DEFAULT_OP_TIMEOUT (120 s), which is how a
+    # CI run spent six minutes on one page.
+    try:
+        import puppeteer_scraper as pyp
+    except ImportError as e:
+        skips.append(f"puppeteer_scraper ({e})")
+        return ok
+    import asyncio
+    import threading
+    import time as _time
+    bridge = pyp._AsyncBridge()
+    try:
+        threading.Timer(0.3, lambda: setattr(
+            bridge, "broken", "the page crashed (stub)")).start()
+        started = _time.monotonic()
+        raised = None
+        try:
+            bridge.run(asyncio.sleep(30), timeout=60)
+        except pyp.BrowserGone as e:
+            raised = e
+        took = _time.monotonic() - started
+        ok &= check("a call in flight ends with BrowserGone when the page "
+                    "crashes", raised is not None)
+        ok &= check(f"...within a second, not its timeout ({took:.1f}s)",
+                    took < 5)
+        raised = None
+        coro = asyncio.sleep(0)
+        try:
+            bridge.run(coro)
+        except pyp.BrowserGone as e:
+            raised = e
+        ok &= check("a later call fails at once while the browser is dead",
+                    raised is not None)
+        ok &= check("...but teardown still runs",
+                    bridge.run(asyncio.sleep(0, result="closed"),
+                               even_if_broken=True) == "closed")
+
+        async def _raises_timeout():
+            raise TimeoutError("from the coroutine")
+        bridge.broken = None
+        started = _time.monotonic()
+        try:
+            bridge.run(_raises_timeout(), timeout=10)
+        except TimeoutError:
+            pass
+        ok &= check("a TimeoutError the coroutine raised is re-raised, not "
+                    "polled until the deadline",
+                    _time.monotonic() - started < 5)
+
+        # A call that misses its bound marks the browser failed, so the
+        # calls after it do not each wait out the same bound again.
+        bridge.broken = None
+        try:
+            bridge.run(asyncio.sleep(5), timeout=0.5)
+        except TimeoutError:
+            pass
+        ok &= check("a call that misses its bound marks the browser failed",
+                    bool(bridge.broken))
+        ok &= check("...and the default bound is far below the old 120 s",
+                    pyp.DEFAULT_OP_TIMEOUT <= 60
+                    and pyp.NAV_OP_TIMEOUT > 60)
+        bridge.broken = None
+
+        # A renderer that is pegged rather than crashed: content() does not
+        # come back. It must mark the browser failed after CONTENT_TIMEOUT,
+        # not leave each later call to wait out its own 120 s.
+        def _hung(*a, **k):
+            raise TimeoutError("stub: content() never returned")
+        session = types.SimpleNamespace(
+            bridge=types.SimpleNamespace(broken=None, run=_hung),
+            page=mock.MagicMock())
+        ok &= check("a document read that times out returns None",
+                    pyp._content(session) is None)
+        ok &= check("...and marks the browser failed, so the fetch "
+                    "relaunches", bool(session.bridge.broken))
+        ok &= check("...within a bound far below the 120 s default",
+                    pyp.CONTENT_TIMEOUT <= 60)
+    finally:
+        bridge.close()
+    return ok
+
+
+def test_pyppeteer_runs_on_the_browser_it_is_given(skips):
+    group("pyppeteer: --chromium-path picks the browser, and the canary uses it")
+    ok = True
+    # The bundled Chromium 117 crashed its renderer on most event pages on
+    # GitHub's runners, so a canary that ran it was testing that build, not
+    # this engine. The canary passes --chromium-path; checked on the
+    # command itself (up to the last continued line), not anywhere in the
+    # file, so a flag left in a comment or an echo does not satisfy it.
+    path = os.path.join(REPO_ROOT, ".github", "workflows", "canary.yml")
+    if os.path.exists(path):
+        canary = open(path, encoding="utf-8").read()
+        commands = re.findall(
+            r"bin/python\s+puppeteer_scraper\.py(?:[^\n]*\\\n)*[^\n]*",
+            canary)
+        ok &= check("the canary runs puppeteer_scraper.py", bool(commands))
+        ok &= check("...and every such run passes --chromium-path",
+                    bool(commands)
+                    and all("--chromium-path" in c for c in commands))
+    elif os.path.exists(os.path.join(REPO_ROOT, ".github")):
+        ok &= check("the canary workflow exists", False)
+
+    try:
+        import puppeteer_scraper as pyp
+    except ImportError as e:
+        skips.append(f"puppeteer_scraper ({e})")
+        return ok
+
+    class _Stop(Exception):
+        pass
+
+    seen = []
+
+    async def _fake_launch(**kwargs):
+        seen.append(kwargs)
+        raise _Stop()
+
+    saved = pyp.launch
+    pyp.launch = _fake_launch
+    bridge = pyp._AsyncBridge()
+    try:
+        for given in (None, "/opt/stub/chromium"):
+            args = _stub_args("unused")
+            args.chromium_path = given
+            seen.clear()
+            try:
+                pyp._Session(bridge, args, None).open()
+            except _Stop:
+                pass
+            got = seen[0].get("executablePath") if seen else "<not launched>"
+            if given is None:
+                ok &= check("without the flag, pyppeteer's own Chromium is "
+                            "launched (no executablePath)",
+                            bool(seen) and "executablePath" not in seen[0])
+            else:
+                ok &= check("with the flag, that path is launched (%r)" % got,
+                            got == given)
+    finally:
+        pyp.launch = saved
+        bridge.close()
+    return ok
+
+
+def test_parser_failure_is_reported_by_every_engine():
+    group("A served page that parses to nothing is a parser failure")
+    ok = True
+    for engine in ENGINES:
+        source = _engine_source(engine)
+        ok &= check(f"{engine} detects it",
+                    "parsed_nothing_from_a_served_page(" in source)
+        ok &= check(f"{engine} records it on the outcome",
+                    "outcome.state = page_flow.PARSER_FOUND_NOTHING" in source)
+        ok &= check(f"{engine} turns it into page 1's stop reason",
+                    "stop_reason = page_flow.PARSER_FOUND_NOTHING" in source)
+    return ok
+
+
+def test_csv_formula_cells_are_neutralised():
+    group("CSV cells that a spreadsheet would execute")
+    ok = True
+    rows = [Market(title="=HYPERLINK(\"http://x\")", sku="+1", url="@cmd",
+                   tags=["-a", "b"], price=-0.5),
+            Market(title="Will it rain?", sku="m2", url="https://p/x",
+                   tags=["b", "-c"], price=0.25)]
+    with tempfile.TemporaryDirectory() as tmp:
+        prefix = os.path.join(tmp, "o")
+        rc = finish_run(rows, prefix, "both", False, blocked=False,
+                        stop_reason="completed", pages_requested=1,
+                        pages_completed=1, start_url="u", final_url="u",
+                        extra={"total_events": 7})
+        table = list(csv_module.DictReader(open(prefix + ".csv",
+                                                encoding="utf-8")))
+        data = json.load(open(prefix + ".json", encoding="utf-8"))
+        meta = json.load(open(prefix + ".meta.json", encoding="utf-8"))
+        ok &= check("the run still exits 0", rc == 0)
+        ok &= check("a formula title gets a leading apostrophe in CSV",
+                    table[0]["title"].startswith("'="))
+        ok &= check("...as do + and @ cells",
+                    table[0]["sku"] == "'+1" and table[0]["url"] == "'@cmd")
+        ok &= check("a list is escaped AFTER it is joined",
+                    table[0]["tags"].startswith("'-a"))
+        ok &= check("...and a list whose first item is safe is left alone",
+                    table[1]["tags"] == "b | -c")
+        ok &= check("a negative NUMBER is not turned into text",
+                    table[0]["price"] == "-0.5")
+        ok &= check("JSON keeps the site's bytes",
+                    data[0]["title"].startswith("=") and data[0]["sku"] == "+1")
+        ok &= check("the sidecar says how many cells were escaped",
+                    meta.get("csv_cells_escaped") == 4)
+        ok &= check("...beside the caller's own extra",
+                    meta.get("total_events") == 7)
+        finish_run(rows, prefix, "both", False, blocked=False,
+                   stop_reason="completed", pages_requested=1,
+                   pages_completed=1, start_url="u", final_url="u",
+                   extra={"csv_cells_escaped": "caller"})
+        meta = json.load(open(prefix + ".meta.json", encoding="utf-8"))
+        ok &= check("...merged UNDER it, so the caller's value wins a "
+                    "collision", meta.get("csv_cells_escaped") == "caller")
+    return ok
+
+
+def test_no_private_citations():
+    group("Public files cite no private documents")
+    ok = True
+    # Assembled from pieces so this file does not match itself.
+    banned = [re.compile(re.escape("CLAUDE" + ".md")),
+              re.compile(re.escape("claude" + "_2scraper")),
+              re.compile(re.escape("2scraper" + "_repo_rules")),
+              re.compile("(?:play" + "book|tem" + "plate) " + "§"),
+              re.compile("§" + r"\s*\d")]
+    import subprocess
+    try:
+        tracked = subprocess.run(
+            ["git", "ls-files"], cwd=REPO_ROOT, capture_output=True,
+            text=True, check=True).stdout.split()
+    except (OSError, subprocess.CalledProcessError):
+        # Inside the Docker image there is no git; scan the tree instead.
+        tracked = [str(p.relative_to(REPO_ROOT))
+                   for p in pathlib.Path(REPO_ROOT).rglob("*")
+                   if p.is_file() and ".git" not in p.parts
+                   and "__pycache__" not in p.parts
+                   and not _in_virtualenv(str(p))]
+    hits = []
+    for name in tracked:
+        if name.endswith((".png", ".jpg", ".gz", ".zip")):
+            continue
+        try:
+            text = open(os.path.join(REPO_ROOT, name), encoding="utf-8").read()
+        except (OSError, UnicodeDecodeError):
+            continue
+        for pattern in banned:
+            m = pattern.search(text)
+            if m:
+                hits.append(f"{name}: {m.group(0)!r}")
+                break
+    ok &= check("no tracked file cites a private document or a section "
+                "number (%s)" % (hits[:5] or "none"), not hits)
+    ok &= check("...and the scan read files", len(tracked) > 20)
+    return ok
+
+
+def test_the_credential_scan_is_not_blinded_by_its_parent_directory():
+    group("The credential scan reads the tree wherever the clone lives")
+    ok = True
+    script = os.path.join(REPO_ROOT, ".github", "ci_checks.py")
+    if not os.path.exists(os.path.join(REPO_ROOT, ".github")):
+        # The Docker image carries no CI material at all; there is nothing
+        # to run. Keyed on the whole directory, never on the file, so a
+        # deleted script cannot make this pass.
+        return ok
+    import shutil
+    import subprocess
+    plant = "a" * 16 + "b" * 16  # key-shaped, assembled so this file is clean
+    for parent in ("venv", ".venv", "build"):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = os.path.join(tmp, parent, "clone")
+            os.makedirs(os.path.join(repo, ".github"))
+            shutil.copy(script, os.path.join(repo, ".github"))
+            with open(os.path.join(repo, "notes.md"), "w") as f:
+                f.write("key = %s\n" % plant)
+            result = subprocess.run(
+                [sys.executable, os.path.join(repo, ".github", "ci_checks.py"),
+                 "--secret-check"], capture_output=True, text=True)
+            blob = result.stdout + result.stderr
+        ok &= check(f"a clone under {parent}/ still finds a planted key",
+                    result.returncode != 0 and "notes.md" in blob)
+    return ok
+
+
+def test_capture_shapes_and_single_ci_checks():
+    group("Captures stay out of commits; CI checks live in one place")
+    ok = True
+    import subprocess
+
+    def ignored(path):
+        try:
+            return subprocess.run(["git", "check-ignore", "-q", path],
+                                  cwd=REPO_ROOT).returncode == 0
+        except OSError:
+            return None
+    if ignored("README.md") is None or not os.path.isdir(
+            os.path.join(REPO_ROOT, ".git")):
+        return ok  # no git here (the Docker image): nothing to ask
+    for path in ("dump.html", "live/page.html", "out/x.html",
+                 "canary.json.page3"):
+        ok &= check(f"{path} is ignored", ignored(path))
+    for path in ("smoke_test.py", "fixtures_generated.json",
+                 "sample_output.csv", ".github/workflows/tests.yml"):
+        ok &= check(f"{path} is NOT ignored", not ignored(path))
+    workflows = os.path.join(REPO_ROOT, ".github", "workflows")
+    if os.path.isdir(workflows):
+        for name in sorted(os.listdir(workflows)):
+            text = open(os.path.join(workflows, name), encoding="utf-8").read()
+            ok &= check(f"{name} imports no local module inline (it calls "
+                        f".github/ci_checks.py instead)",
+                        not re.search(r"from (output_writer|product_parser|"
+                                      r"page_flow) import", text))
+    return ok
+
+
 def main() -> int:
     ok = True
     skips = []
@@ -3196,6 +3682,14 @@ def main() -> int:
     ok &= test_readme_claims()
     ok &= test_x_debug_header_is_redacted()
     ok &= test_scraper_api_payload_and_status()
+    ok &= test_one_solve_allowance_per_page(skips)
+    ok &= test_a_dead_browser_is_not_a_block(skips)
+    ok &= test_pyppeteer_runs_on_the_browser_it_is_given(skips)
+    ok &= test_parser_failure_is_reported_by_every_engine()
+    ok &= test_csv_formula_cells_are_neutralised()
+    ok &= test_no_private_citations()
+    ok &= test_the_credential_scan_is_not_blinded_by_its_parent_directory()
+    ok &= test_capture_shapes_and_single_ci_checks()
 
     passed = _total_checks - len(_failures)
     if passed < CLAIMED_CHECK_FLOOR:

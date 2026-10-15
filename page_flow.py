@@ -2,7 +2,7 @@
 
 Polymarket answers a request five ways, and four of them want a different
 response, which is why this module exists rather than the same triage being
-written three times inside three engines and drifting apart (§1):
+written three times inside three engines and drifting apart:
 
     content    the page's own payload names markets, or its tiles are
                rendered
@@ -45,7 +45,7 @@ passes its own driver's primitives and keeps its browser plumbing to itself:
     page_height() -> Optional[int]      document.body.scrollHeight
     sleep(ms) -> None                   wait
 
-No JavaScript crosses that boundary in either direction (§1): Selenium's
+No JavaScript crosses that boundary in either direction: Selenium's
 `execute_script` takes a function BODY with an explicit `return` where
 Playwright and pyppeteer take `() => expr`, so this module names the
 OPERATION and each engine spells it in its own driver's dialect.
@@ -70,7 +70,7 @@ logger = logging.getLogger("page_flow")
 # ---------------------------------------------------------------------------
 READY_SELECTOR = SELECTORS["item_card"]
 
-# Above 1, per §5: waiting for a single match resolves on the site's own
+# Above 1: waiting for a single match resolves on the site's own
 # navigation — which links five listings above the fold — long before a grid
 # paints. Measured first paints: 20 distinct events on `/predictions`, 20 on
 # a category listing, and on an event page 14 to 40 links into the rail of
@@ -156,7 +156,7 @@ def wait_for_count(count: Callable[[str], int], sleep: Callable[[int], None],
     written the safe way now rather than after a header changes.
 
     Returns the count it ended on, whether or not it reached the floor:
-    reporting a timeout is not the same as exiting on one (§8).
+    reporting a timeout is not the same as exiting on one.
     """
     waited = 0
     found = count(selector)
@@ -173,7 +173,7 @@ def wait_for_count(count: Callable[[str], int], sleep: Callable[[int], None],
 # ---------------------------------------------------------------------------
 # Lazy loading
 # ---------------------------------------------------------------------------
-# §8's second case, and on this site it is measured to be a non-event: a
+# The family's second case, and on this site it is measured to be a non-event: a
 # listing scrolled to the bottom twelve times held exactly the twenty events
 # its first response shipped, with the document height unchanged at 3,654px
 # throughout, headless and headful alike.
@@ -241,7 +241,7 @@ def classify(html: Optional[str], status: Optional[int] = None,
     Getting that wrong is not a style question: a sibling repo shipped two of
     three engines calling this as `classify(html, url=...)`, both crashed on
     their first fetch, and nothing short of a live run or a signature-binding
-    check saw it (§17). This repo's smoke suite binds every shared-module
+    check saw it. This repo's smoke suite binds every shared-module
     call in every engine for that reason.
     """
     if html is None:
@@ -250,7 +250,7 @@ def classify(html: Optional[str], status: Optional[int] = None,
 
 
 # The retry/solve/blocked decision as DATA rather than as three copies of an
-# if-chain in three engines (§1).
+# if-chain in three engines.
 #
 #   parse    is there anything on this page worth writing down?
 #   retry    would fetching it again, in a fresh context, plausibly help?
@@ -260,7 +260,7 @@ STATE_POLICY: Dict[str, Dict[str, bool]] = {
     "content":   {"parse": True,  "retry": False, "solve": False, "blocked": False},
     # A 404 for an event slug that does not exist. The site was asked and
     # answered; a second fetch returns the same 404. Not blocked: exit 4 is
-    # "ran fine, found nothing", which is exactly what happened (§8).
+    # "ran fine, found nothing", which is exactly what happened.
     "empty":     {"parse": False, "retry": False, "solve": False, "blocked": False},
     # Served and still painting. Parsed rather than discarded, because by the
     # time an engine asks, the readiness wait has already run — and on this
@@ -272,7 +272,7 @@ STATE_POLICY: Dict[str, Dict[str, bool]] = {
     # blocked if neither works.
     #
     # `solve: True` here is the one line in this file that differs from the
-    # sibling repo this policy was adapted from, and §19 is why. Polymarket
+    # sibling repo this policy was adapted from, and the family rule is why. Polymarket
     # sits behind Cloudflare — `server: cloudflare` and a `cf-ray` on every
     # response — and Cloudflare's managed challenge renders a Turnstile,
     # which 2Captcha solves with `TurnstileTaskProxyless`. No challenge was
@@ -284,7 +284,7 @@ STATE_POLICY: Dict[str, Dict[str, bool]] = {
     #
     # Nothing is charged for a page that carries no widget: `turnstile_task_
     # for` raises rather than building a task from a sitekey-less detection,
-    # which is §8's "detected != paying" with a price tag on it.
+    # which is the family's "detected != paying" with a price tag on it.
     "challenge": {"parse": False, "retry": True,  "solve": True,  "blocked": True},
     "blocked":   {"parse": False, "retry": True,  "solve": False, "blocked": True},
 }
@@ -293,7 +293,7 @@ STATE_POLICY: Dict[str, Dict[str, bool]] = {
 # Every state the parser can return has a row here, and every row here is a
 # state the parser can return. Asserted at import rather than in a test,
 # because a state with no policy falls back to `blocked` — which is the safe
-# direction and also the silent one (§17: a policy that looks enforced and is
+# direction and also the silent one (a policy that looks enforced and is
 # not).
 assert set(STATE_POLICY) == set(PAGE_STATES), (
     "STATE_POLICY and product_parser.PAGE_STATES disagree: "
@@ -348,7 +348,7 @@ def is_unpainted(state: str, html: Optional[str]) -> bool:
 # Byte-identical responses to all three: this site does not discriminate on
 # the User-Agent and did not rate-limit a normal run. A sibling repo found
 # the opposite (11 of 11 refused for a `HeadlessChrome` token), which is
-# precisely why it was measured here rather than inherited (§13).
+# precisely why it was measured here rather than inherited.
 #
 # So the constants below are the family's defaults and are NOT measurements
 # of this site. They are here because a run that does meet a refusal should
@@ -360,11 +360,43 @@ BLOCK_RETRIES_WITHOUT_POOL = 3
 BLOCK_RETRIES_WITH_POOL = 4
 SOLVES_PER_PAGE = 1
 
+
+class SolveBudget:
+    """The per-page allowance of paid captcha solves, as one object.
+
+    Every engine calls its captcha handler TWICE per fetch attempt: once
+    before the page is classified, so a challenge is cleared before anything
+    is judged, and once after, for the state that says the page really is
+    gated. Only the second call used to be counted, and the first repeats on
+    every block retry, so with the solver stubbed one page bought five solves
+    against a limit of one.
+
+    So the allowance is checked where the money is spent — immediately
+    before the solver is called, inside the handler — and both call sites
+    hand it the same object. It is created once per page and is NOT reset by
+    a retry, a relaunch or a rotation: a fresh exit is a reason to re-fetch,
+    not a fresh allowance.
+    """
+
+    def __init__(self, limit: int = SOLVES_PER_PAGE):
+        self.limit = limit
+        self.spent = 0
+
+    def allows(self) -> bool:
+        return self.spent < self.limit
+
+    def spend(self) -> bool:
+        """Claim one solve. False, and nothing claimed, when none is left."""
+        if not self.allows():
+            return False
+        self.spent += 1
+        return True
+
 # Whether a retry has to discard the browser context rather than reload the
 # page. True, on the family's rule that a challenge issued against one
-# session is not cleared by asking that same session again — and on §8's
+# session is not cleared by asking that same session again — and on the family's
 # "a rotation is a fresh browser", which is the same rule with a proxy in it.
-# Consulted by all three engines; a constant no engine read would be the §17
+# Consulted by all three engines; a constant no engine read would be the
 # defect of a policy that looks enforced and is not.
 RETRY_NEEDS_FRESH_CONTEXT = True
 
@@ -376,7 +408,7 @@ def block_advice(html: Optional[str], headless: bool, has_pool: bool) -> str:
     write the sibling repo's ordering — "use a real window first" — but that
     ordering came from ITS measurements, and on this site headless and
     headful were measured identical (20 events both ways). Repeating it would
-    be §13's inherited number wearing a fact's clothes.
+    be the family's inherited number wearing a fact's clothes.
     """
     marker = detect_block_marker(html or "") or "no vendor marker"
     lead = f"blocked ({marker})"
@@ -418,13 +450,13 @@ def block_advice(html: Optional[str], headless: bool, has_pool: bool) -> str:
 # ---------------------------------------------------------------------------
 # `--mode events` walks the `/event/{slug}` pages a listing named. Those are
 # real, independent addresses, knowable the moment page 1 is parsed — which
-# is what makes `--concurrency` meaningful there and nowhere else (§7).
+# is what makes `--concurrency` meaningful there and nowhere else.
 #
 # `--mode markets` and `--mode event` are ONE page each. Not "one page until
 # we find the next link": there is no next page, and the three ways that was
 # established are in `product_parser`'s docstring. A `?page=2` here is not an
 # error, it is IGNORED, and a run built on it would add no new sku, call the
-# listing exhausted and report COMPLETE holding one page (§18).
+# listing exhausted and report COMPLETE holding one page.
 def page_cap_reached(page_num: int) -> bool:
     return page_num >= PAGE_CAP
 
@@ -435,7 +467,7 @@ def one_page_note(url: str, pages_requested: int) -> Optional[str]:
     Printed rather than swallowed, because "I asked for 3 pages and got 1"
     with no explanation is indistinguishable from the family's most expensive
     bug — a dead next-page selector quietly returning a third of the data
-    with exit 0 (§7). Here the run really did get everything the URL has, and
+    with exit 0. Here the run really did get everything the URL has, and
     the difference has to be visible in the log and in the sidecar.
     """
     if pages_requested <= 1:
@@ -470,7 +502,7 @@ def total_events_on_page(html: Optional[str]) -> Optional[int]:
 def page_gap(html: Optional[str], parsed: int) -> Optional[int]:
     """None, always, on this site — and that is the honest answer.
 
-    §8's rank arithmetic works where a site NUMBERS its items: 30 rows
+    The family's rank arithmetic works where a site NUMBERS its items: 30 rows
     spanning ranks 1-50 proves 20 cards never loaded. Polymarket numbers
     nothing, and the only total it publishes is the size of the whole
     catalogue (21,511 against a page of 20). Reading that as a gap would
@@ -478,7 +510,7 @@ def page_gap(html: Optional[str], parsed: int) -> Optional[int]:
     everything it was ever going to.
 
     None rather than 0, because an unknown gap is not a gap of zero and the
-    two must not read the same in a sidecar (§8).
+    two must not read the same in a sidecar.
     """
     return None
 
@@ -487,12 +519,39 @@ def parsed_nothing_from_a_served_page(html: Optional[str], rows: int) -> bool:
     """A page that was SERVED, links to events, and produced no rows.
 
     That is this parser's bug and not an empty listing, and the two must not
-    report the same (§20). The engines give it its own stop reason so a
+    report the same. The engines give it its own stop reason so a
     reader goes to `product_parser.py` instead of checking their URL.
     """
     if rows or not html:
         return False
     return served_by_polymarket(html) and count_cards(html) >= MIN_CARD_MATCHES
+
+
+PARSER_FOUND_NOTHING = "parser_found_nothing"
+
+
+def failure_stop_reason(outcome) -> str:
+    """The sidecar's stop_reason for a page that did not yield its rows.
+
+    One spelling for all three engines, so they cannot disagree about what
+    the same failure is called:
+
+      browser_failed        the engine's own browser died under the fetch (a
+                            crashed page, a closed DevTools connection).
+                            Nothing was read from the site: exit 5, never 3
+      page_load_timeout     the navigation itself never completed: exit 5
+      parser_found_nothing  the site SERVED a page linking to events and this
+                            parser read none of them: a parser failure, exit
+                            5 with no rows, never the "genuinely empty" 4
+      blocked_<vendor>      the site refused: exit 3
+    """
+    if outcome.load_failed:
+        if getattr(outcome, "browser_failure", None):
+            return "browser_failed"
+        return "page_load_timeout"
+    if outcome.blocked_by is None and outcome.state == PARSER_FOUND_NOTHING:
+        return PARSER_FOUND_NOTHING
+    return f"blocked_{outcome.blocked_by}"
 
 
 # ---------------------------------------------------------------------------

@@ -50,7 +50,7 @@ WHAT IS DIFFERENT ABOUT THIS SITE
 * **Headless and headful were measured IDENTICAL** — 20 events both ways —
   so headless is the default here, unlike a sibling repo where it was the
   difference between 4 of 4 and 0 of 4. A number that came from another
-  site's measurement is not a number about this one (§13).
+  site's measurement is not a number about this one.
 
 * **It is behind Cloudflare even though it never challenged us.**
   `server: cloudflare` and a `cf-ray` on every response. A managed challenge
@@ -59,7 +59,7 @@ WHAT IS DIFFERENT ABOUT THIS SITE
   interception script on the CONTEXT before any page script runs, and
   2Captcha solves it with `TurnstileTaskProxyless`. None was met while this
   was built; the capability is implemented and the README never claims a
-  captcha here cannot be solved (§19).
+  captcha here cannot be solved.
 
 * **A page that is not Polymarket's HTML is recognised STRUCTURALLY.**
   Chromium's own proxy-error page carries `<title>polymarket.com</title>` —
@@ -181,6 +181,9 @@ class PageOutcome:
     products: List = field(default_factory=list)
     blocked_by: Optional[str] = None
     load_failed: bool = False
+    # Set when the BROWSER failed (a crashed page, a closed connection)
+    # rather than the site: such a page is a fetch failure, not a block.
+    browser_failure: Optional[str] = None
     state: Optional[str] = None
     # How many events the LISTING holds in total, where the site states one
     # — 21,511 for /predictions against the twenty it ships. NOT a per-page
@@ -191,7 +194,7 @@ class PageOutcome:
     # rather than assumed.
     total_events: Optional[int] = None
     # None, always, on this site: Polymarket numbers nothing, and an unknown
-    # gap must not read the same as a gap of zero (§8).
+    # gap must not read the same as a gap of zero.
     gap: Optional[int] = None
     # What the scroll did: how many cards it reached and whether it SETTLED.
     # A batch whose feed was still growing when the round budget ran out is
@@ -229,7 +232,7 @@ FIELD_FLOOR = 95
 # engines make it identically. What lives here is only HOW to ask this
 # particular driver.
 #
-# The primitives are NAMED OPERATIONS rather than JavaScript (§1). Selenium's
+# The primitives are NAMED OPERATIONS rather than JavaScript. Selenium's
 # execute_script takes a function BODY with an explicit `return` while
 # Playwright and pyppeteer take `() => expr`, so a shared module handing JS
 # across this boundary would quietly acquire one driver's dialect.
@@ -271,7 +274,7 @@ def _scroll_to_bottom(page) -> None:
     To `document.body.scrollHeight` rather than by a fixed wheel distance: a
     fixed wheel stopped three rounds short of the bottom on a sibling site's
     7,600px grid, so the lazy-load trigger was never reached and a run took
-    30 of 50 cards while looking settled (§8).
+    30 of 50 cards while looking settled.
 
     Guarded for the same reason `_count` is: the page can navigate mid-loop
     on this site, and a scroll that raises turns a routine challenge into a
@@ -301,7 +304,7 @@ def _page_height(page) -> Optional[int]:
 # SAME threshold in all three engines. A threshold that differed between
 # them would mean one engine reporting `complete` where its twins report
 # `partial` on the identical run, which is precisely the drift the shared
-# modules exist to prevent (§6).
+# modules exist to prevent.
 _SITE_HOST_FRAGMENT = "polymarket.com"
 
 
@@ -459,15 +462,43 @@ class _BrowserSession:
     def __init__(self, pw, args, pool, remote: bool = False):
         self.pw, self.args, self.pool, self.remote = pw, args, pool, remote
         self.browser = self.context = self.page = None
+        self.browser_failure: Optional[str] = None
 
     def open(self):
+        self.browser_failure = None
         if self.remote:
             self.browser, self.context, self.page = _connect_remote(self.pw, self.args)
         else:
             self.browser, self.context, self.page = _launch_local(
                 self.pw, self.args, self.pool)
         _watch_refusals(self)
+        self._watch_for_death()
         return self
+
+    def _watch_for_death(self):
+        """Record a renderer crash or a lost browser connection.
+
+        Either one makes the document unreadable, and an unreadable document
+        classifies as "blocked". The fetch loop reads this instead, so a dead
+        browser is a fetch failure (exit 5) rather than a site block (exit 3).
+        Bound to the handles current now, so the old browser's disconnect
+        during a relaunch cannot mark its replacement.
+        """
+        browser, page = self.browser, self.page
+
+        def _crashed(*_):
+            if page is self.page:
+                self.browser_failure = "the page crashed"
+
+        def _disconnected(*_):
+            if browser is self.browser:
+                self.browser_failure = "the browser connection closed"
+
+        try:
+            page.on("crash", _crashed)
+            browser.on("disconnected", _disconnected)
+        except Exception as e:  # noqa: BLE001 — never break a run over this
+            logger.debug("Could not attach the crash watchers: %s", e)
 
     def relaunch(self):
         """Tear the browser down and come back on the pool's current exit.
@@ -584,7 +615,13 @@ def _content_when_settled(page, attempts: int = 4, pause_ms: int = 700):
         try:
             return page.content()
         except PWError as e:
-            if "navigating" not in str(e).lower():
+            message = str(e).lower()
+            if "crash" in message or "closed" in message:
+                # A dead page or browser: there is no document to read, and
+                # the fetch loop reports that as a browser failure.
+                logger.warning("content() failed: %s", str(e)[:160])
+                return None
+            if "navigating" not in message:
                 raise
             if attempt == attempts:
                 logger.warning("Page kept navigating through %d attempts — "
@@ -596,7 +633,8 @@ def _content_when_settled(page, attempts: int = 4, pause_ms: int = 700):
     return None
 
 
-def handle_captcha_if_present(page, args) -> bool:
+def handle_captcha_if_present(page, args,
+                              budget: "page_flow.SolveBudget") -> bool:
     """Detect and solve a challenge. True if something was solved.
 
     Runs after EVERY navigation, for ANY page. The static-HTML and runtime
@@ -612,7 +650,7 @@ def handle_captcha_if_present(page, args) -> bool:
     polymarket.com, and saying that plainly is the point — a sibling repo
     shipped a README sentence claiming a captcha here "cannot be solved",
     which was a statement about its own missing code dressed up as a fact
-    about a paid product, and it cost a release (§19).
+    about a paid product, and it cost a release.
 
     What IS true: the site sits behind Cloudflare, a managed challenge
     renders a Turnstile, and 2Captcha solves that with
@@ -622,7 +660,7 @@ def handle_captcha_if_present(page, args) -> bool:
     publishes no sitekey in its markup.
 
     The detector runs after EVERY navigation and stays broad, which is
-    deliberate (§8): which challenge a visitor meets depends on the exit
+    deliberate: which challenge a visitor meets depends on the exit
     country and on what the address has been doing, and a narrow detector is
     how a rendered challenge gets reported as an empty listing months later.
     """
@@ -679,6 +717,14 @@ def handle_captcha_if_present(page, args) -> bool:
     if not args.twocaptcha_key:
         logger.warning("No 2captcha API key, so this challenge cannot be "
                        "solved — continuing with whatever the page holds.")
+        return False
+    # The page's allowance is checked HERE, immediately before the money is
+    # spent, so both call sites in _fetch_one_page and every block retry draw
+    # on the same one. See page_flow.SolveBudget.
+    if not budget.spend():
+        logger.warning("This page's solve allowance (%d) is spent — not "
+                       "buying another; continuing with whatever the page "
+                       "holds.", budget.limit)
         return False
     try:
         token = solve_recaptcha(challenge, args.twocaptcha_key,
@@ -779,7 +825,7 @@ def _worker_pool(pool, worker_index: int):
         to burn that address.
       * No shared mutable state between threads, so rotation needs no lock:
         the concurrency is safe by construction rather than by discipline
-        (§7).
+.
     """
     if not pool:
         return None
@@ -795,7 +841,7 @@ def _fetch_pages_concurrently(args, pool, specs, concurrency: int):
     sync API a browser belongs to the thread that made it, so sharing one
     across threads is not an option even if it were desirable.
 
-    Only ever called for a `--mode events` walk, and that mode is §7's "page
+    Only ever called for a `--mode events` walk, and that mode is the family's "page
     1 is fetched alone because its content decides whether the rest can be
     addressed" in its most literal form: page 5's address does not merely
     depend on page 4, it does not EXIST until the listing is parsed. Once it
@@ -869,7 +915,7 @@ def _fetch_pages_concurrently(args, pool, specs, concurrency: int):
 
     # Anything still queued was never attempted (a worker died, or dispatch
     # stopped at the end of the listing). NOT reported as failed pages: they
-    # were not tried, and claiming otherwise would overstate the damage (§8).
+    # were not tried, and claiming otherwise would overstate the damage.
     unattempted = []
     while True:
         try:
@@ -901,7 +947,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
 
     has_pool = bool(pool and len(pool) > 1)
     # `RETRY_ON_BLOCKED` is CONSULTED, not merely documented — a policy
-    # constant nothing reads is the same defect as dead code (§17). It is
+    # constant nothing reads is the same defect as dead code. It is
     # True on the family's rule rather than on a measurement of this site,
     # which refused nothing while this was written: see page_flow's block
     # section, which says so in as many words rather than inheriting a
@@ -912,7 +958,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
     # Counted across the whole block-retry loop, not per attempt: a page that
     # keeps coming back as a challenge would otherwise buy one solve per
     # rotation, which is how a run quietly turns into a bill.
-    solves_bought = 0
+    budget = page_flow.SolveBudget()
     html, state, load_failed = None, "ok", False
 
     for block_attempt in range(block_retries + 1):
@@ -964,14 +1010,14 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
         if load_failed:
             break
 
-        if handle_captcha_if_present(session.page, args):
+        if handle_captcha_if_present(session.page, args, budget):
             session.page.wait_for_timeout(1000)
 
         html = _content_when_settled(session.page) or ""
         state = _classify(session.page, html)
 
         # "Not painted yet" is not a fault, and telling it apart from one is
-        # the distinction §8 is about. A search page's first response is a
+        # the distinction the family rule is about. A search page's first response is a
         # shell — the grid arrives over client-side GraphQL — so classified
         # naively it reads as something to retry, and retrying a shell buys
         # another shell. Wait for the anchor and re-classify BEFORE the retry
@@ -993,9 +1039,8 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
             state = _classify(session.page, html)
 
         if (page_flow.should_solve(state)
-                and solves_bought < page_flow.SOLVES_PER_PAGE):
-            solves_bought += 1
-            if handle_captcha_if_present(session.page, args):
+                and budget.allows()):
+            if handle_captcha_if_present(session.page, args, budget):
                 session.page.wait_for_timeout(1000)
                 html = _content_when_settled(session.page) or html
                 state = _classify(session.page, html)
@@ -1009,6 +1054,22 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
                     logger.warning("The solve was NOT accepted: page %d is "
                                    "still %s. The purchase is spent.",
                                    page_num, state)
+
+        if session.browser_failure:
+            # The browser died under the fetch. What is left is not an
+            # answer from the site, so it must not be classified as a block.
+            outcome.browser_failure = session.browser_failure
+            load_failed = True
+            if not session.remote and block_attempt < block_retries:
+                logger.warning(
+                    "Page %d: %s. That is this engine's browser failing, not "
+                    "the site refusing — relaunching it and fetching again "
+                    "(%d/%d).", page_num, session.browser_failure,
+                    block_attempt + 1, block_retries)
+                session.relaunch()
+                continue
+            break
+        outcome.browser_failure = None
 
         if not page_flow.should_retry(state):
             # "content" and "empty" are both final answers. An empty search
@@ -1034,7 +1095,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
                 # relaunches rather than reloading — this is what
                 # `page_flow.RETRY_NEEDS_FRESH_CONTEXT` says, and a constant
                 # no engine consulted would be dead policy dressed up as
-                # enforcement (§17).
+                # enforcement.
                 #
                 # NOT relaunched over --cdp-endpoint: a Scraping Browser
                 # profile allows one live connection, so reconnecting risks
@@ -1054,7 +1115,14 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
                     session.relaunch()
 
     if load_failed:
-        logger.error("Gave up loading %s after %d attempt(s).", url, args.retries)
+        if outcome.browser_failure:
+            logger.error(
+                "Gave up on %s: %s, and a fresh browser did not get past it. "
+                "Nothing was read from the site, so this is a fetch failure "
+                "(exit 5), not a block.", url, outcome.browser_failure)
+        else:
+            logger.error("Gave up loading %s after %d attempt(s).", url,
+                         args.retries)
         outcome.load_failed = True
         return outcome
 
@@ -1180,7 +1248,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
         # `flight+jsonld` means the page's structured data agreed on the
         # price; `dom` means the payload could not be read at all and these
         # are EVENT-level rows. Reported rather than warned about, because
-        # which one answers is a property of the page (§9).
+        # which one answers is a property of the page.
         from collections import Counter
         views = Counter(p.data_source for p in products)
         logger.info("Rows by view on page %d: %s.", page_num,
@@ -1202,11 +1270,11 @@ def _fetch_one_page(session, args, pool, page_num: int, url: Optional[str]) -> P
         except Exception as e:  # noqa: BLE001
             logger.warning("Could not capture screenshot: %s", e)
         if page_flow.parsed_nothing_from_a_served_page(html, len(products)):
-            # §20: a page that was SERVED, links to N events and parses to
+            # A page that was SERVED, links to N events and parses to
             # zero rows is THIS PARSER'S bug, not an empty listing. Reported
             # as what it is, so a reader opens product_parser.py instead of
             # checking their URL for a typo.
-            outcome.state = "parser_found_nothing"
+            outcome.state = page_flow.PARSER_FOUND_NOTHING
             logger.error(
                 "0 rows parsed from a page the site SERVED, which links to "
                 "%d event(s). That is a parser regression rather than an "
@@ -1242,7 +1310,7 @@ def scrape(args) -> int:
                        "proxy on top would contradict it.")
         pool = None
 
-    # Two shapes of pagination live here, and the MODE picks which (§7).
+    # Two shapes of pagination live here, and the MODE picks which.
     #
     #   events    page 1 is the LISTING and pages 2..N are the event pages
     #             page 1 named. Those are real, independent addresses — but
@@ -1257,7 +1325,7 @@ def scrape(args) -> int:
     #             nothing, and the site's own cursor is opaque. So
     #             `--concurrency` above 1 is refused with that reason rather
     #             than quietly running one worker, which would look like the
-    #             flag did something (§18).
+    #             flag did something.
     plans_pages = args.mode == "events"
 
     concurrency = max(1, args.concurrency)
@@ -1304,14 +1372,22 @@ def scrape(args) -> int:
             outcomes.append(first)
 
             if not first.ok:
-                stop_reason = ("page_load_timeout" if first.load_failed
-                               else f"blocked_{first.blocked_by}")
+                stop_reason = page_flow.failure_stop_reason(first)
                 blocked = first.blocked_by is not None
+
+
+            elif first.state == page_flow.PARSER_FOUND_NOTHING:
+
+                # Served, links to events, and nothing parsed: a parser failure,
+
+                # reported as one (exit 5) rather than as an empty listing (exit 4).
+
+                stop_reason = page_flow.PARSER_FOUND_NOTHING
 
             elif plans_pages:
                 seen_keys.update(p.sku for p in first.products if p.sku is not None)
 
-                # VERIFY before planning (§7). Two redirects on this site
+                # VERIFY before planning. Two redirects on this site
                 # change what was asked for: a search `?q=x` can land on the
                 # TAG listing `/predictions/x`, which is a different set of
                 # events, and an `/event/` URL can resolve to its league path.
@@ -1361,8 +1437,7 @@ def scrape(args) -> int:
                     failed = [o for o in rest if not o.ok]
                     if failed:
                         worst = min(failed, key=lambda o: o.page_num)
-                        stop_reason = ("page_load_timeout" if worst.load_failed
-                                       else f"blocked_{worst.blocked_by}")
+                        stop_reason = page_flow.failure_stop_reason(worst)
                         blocked = any(o.blocked_by for o in rest)
                     elif unattempted:
                         stop_reason = "pages_unattempted"
@@ -1387,9 +1462,8 @@ def scrape(args) -> int:
                                                   page_num, url)
                         outcomes.append(outcome)
                         if not outcome.ok:
-                            stop_reason = ("page_load_timeout"
-                                           if outcome.load_failed
-                                           else f"blocked_{outcome.blocked_by}")
+                            stop_reason = page_flow.failure_stop_reason(
+                                outcome)
                             blocked = outcome.blocked_by is not None
                             break
                         seen_keys.update(p.sku for p in outcome.products
@@ -1421,7 +1495,7 @@ def scrape(args) -> int:
             else:
                 seen_keys.update(p.sku for p in first.products if p.sku is not None)
                 # ONE page, and the run is COMPLETE holding it. This branch is
-                # the one §7 warns about from the other side: a sibling repo
+                # the one the family rule warns about from the other side: a sibling repo
                 # shipped three dead next-page selectors, fetched one page of
                 # three and exited 0, and nobody noticed for months. The
                 # defence here is that the single page is DELIBERATE, stated
@@ -1501,7 +1575,7 @@ def scrape(args) -> int:
         # What the LISTING holds, where the site states it. Beside `rows` in
         # the sidecar rather than subtracted from it: the difference is the
         # site's own twenty-event cap, not a gap this run failed to close
-        # (§8 — an unknown gap is not a gap).
+        # (an unknown gap is not a gap).
         "total_events": total_events,
         # Counted from PAGE 1's OWN rows, not from the merged ones.
         #
@@ -1673,7 +1747,7 @@ def parse_args():
     # ONE OS-family tag, not a list — and the default is what makes
     # --fingerprint work at all. It shipped as "Windows,Chrome,Desktop" across
     # this family, which the API rejects with HTTP 400, so --fingerprint
-    # failed on every invocation in four repos at once (§17).
+    # failed on every invocation in four repos at once.
     p.add_argument("--fp-tags", default="Windows",
                    help="ONE OS-family tag for the fingerprint filter: "
                         "Windows, Microsoft Windows or Android. NOT a list — "
@@ -1701,7 +1775,7 @@ def parse_args():
                         "polymarket.com while this was written, so the path "
                         "is unexercised HERE — which is a fact about this "
                         "repo's testing and not a claim about what a solver "
-                        "can do (§19). A page carrying no widget is reported "
+                        "can do. A page carrying no widget is reported "
                         "unsolved rather than charged for.")
     p.add_argument("--min-score", type=float, default=0.7,
                    help="reCAPTCHA v3 minimum score to request (0.3, 0.7 or "
@@ -1731,7 +1805,7 @@ def parse_args():
                         "right but a column comes back empty — see "
                         "TROUBLESHOOTING.md.")
     # HEADLESS by default, and that is this site's own measurement rather
-    # than the family's habit. §19 says to measure headless against headful
+    # than the family's habit. the family rule says to measure headless against headful
     # once per site because a sibling repo found 0 of 4 against 4 of 4; here
     # the answer came back IDENTICAL — 20 events, the same twenty, on both,
     # with the same 3,654px document. The site also served a `curl/8.0` User-
