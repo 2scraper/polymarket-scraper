@@ -465,9 +465,26 @@ def _refused_count(session) -> int:
     return getattr(session, "_refused", 0)
 
 
+# How long reading the document may take before the page counts as hung.
+# Serialising a 1 MB event page takes well under a second; in the canary of
+# 2026-10-15 pyppeteer's bundled Chromium instead went silent for 3.5 minutes
+# per attempt, its renderer pegged, before finally reporting "Page crashed!".
+# A page that cannot hand over its document in this long is treated as the
+# browser failing, so the fetch loop relaunches instead of waiting it out.
+CONTENT_TIMEOUT = 30
+
+
 def _content(session) -> Optional[str]:
     try:
-        return session.bridge.run(session.page.content())
+        return session.bridge.run(session.page.content(),
+                                  timeout=CONTENT_TIMEOUT)
+    except TimeoutError as e:
+        if not session.bridge.broken:
+            session.bridge.broken = (f"the page stopped answering "
+                                     f"(content() took over "
+                                     f"{CONTENT_TIMEOUT}s)")
+        logger.debug("content() timed out: %s", e)
+        return None
     except Exception as e:  # noqa: BLE001
         logger.debug("content() unavailable (page navigating?): %s", e)
         return None

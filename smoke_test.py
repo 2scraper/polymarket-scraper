@@ -3381,6 +3381,21 @@ def test_a_dead_browser_is_not_a_block(skips):
         ok &= check("a TimeoutError the coroutine raised is re-raised, not "
                     "polled until the deadline",
                     _time.monotonic() - started < 5)
+
+        # A renderer that is pegged rather than crashed: content() does not
+        # come back. It must mark the browser failed after CONTENT_TIMEOUT,
+        # not leave each later call to wait out its own 120 s.
+        def _hung(*a, **k):
+            raise TimeoutError("stub: content() never returned")
+        session = types.SimpleNamespace(
+            bridge=types.SimpleNamespace(broken=None, run=_hung),
+            page=mock.MagicMock())
+        ok &= check("a document read that times out returns None",
+                    pyp._content(session) is None)
+        ok &= check("...and marks the browser failed, so the fetch "
+                    "relaunches", bool(session.bridge.broken))
+        ok &= check("...within a bound far below the 120 s default",
+                    pyp.CONTENT_TIMEOUT <= 60)
     finally:
         bridge.close()
     return ok
