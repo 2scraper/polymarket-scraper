@@ -3382,6 +3382,20 @@ def test_a_dead_browser_is_not_a_block(skips):
                     "polled until the deadline",
                     _time.monotonic() - started < 5)
 
+        # A call that misses its bound marks the browser failed, so the
+        # calls after it do not each wait out the same bound again.
+        bridge.broken = None
+        try:
+            bridge.run(asyncio.sleep(5), timeout=0.5)
+        except TimeoutError:
+            pass
+        ok &= check("a call that misses its bound marks the browser failed",
+                    bool(bridge.broken))
+        ok &= check("...and the default bound is far below the old 120 s",
+                    pyp.DEFAULT_OP_TIMEOUT <= 60
+                    and pyp.NAV_OP_TIMEOUT > 60)
+        bridge.broken = None
+
         # A renderer that is pegged rather than crashed: content() does not
         # come back. It must mark the browser failed after CONTENT_TIMEOUT,
         # not leave each later call to wait out its own 120 s.

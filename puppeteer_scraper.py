@@ -87,7 +87,17 @@ FIELD_FLOOR = 95
 # hung remote call ends the operation instead of the run. pyppeteer provides
 # no connect timeout of its own and its page methods' `timeout` option does
 # not cover a browser that has stopped answering at all.
-DEFAULT_OP_TIMEOUT = 120
+#
+# 30 s, down from 120. A page operation on a healthy browser returns in well
+# under a second; on 2026-10-15 the bundled Chromium's renderer went silent
+# on GitHub's runner for 3.5 minutes per attempt before reporting a crash,
+# and at 120 s per call that silence was spent in full on every evaluate().
+# A call that misses this bound now marks the browser as failed (see
+# _AsyncBridge.run), so the fetch relaunches instead of waiting.
+DEFAULT_OP_TIMEOUT = 30
+# Navigations carry their own 60 s timeout inside pyppeteer; the bridge's
+# bound sits above it so that one fires first and reads as a load timeout.
+NAV_OP_TIMEOUT = 90
 # 150, not 30, and kept identical to the Playwright engine's
 # CDP_CONNECT_TIMEOUT_MS — see its comment. Short version: the upgrade was
 # measured hanging 121s before the SERVER hung up, so 30s gives up while the
@@ -200,6 +210,13 @@ class _AsyncBridge:
                     raise BrowserGone(self.broken)
                 if deadline is not None and time.monotonic() >= deadline:
                     future.cancel()
+                    # A browser that does not answer within the bound is not
+                    # going to answer the next call either: mark it, so the
+                    # fetch loop relaunches rather than spending the bound
+                    # again on every remaining call.
+                    if not even_if_broken and not self.broken:
+                        self.broken = (f"the browser stopped answering (a "
+                                       f"call took over {timeout}s)")
                     raise TimeoutError(
                         f"pyppeteer call did not return within {timeout}s")
 
@@ -620,7 +637,8 @@ def _handle_captcha(session, args, budget: "page_flow.SolveBudget") -> bool:
     _sleep(1500)
     try:
         session.bridge.run(session.page.reload(
-            {"waitUntil": "domcontentloaded", "timeout": 60000}))
+            {"waitUntil": "domcontentloaded", "timeout": 60000}),
+            timeout=NAV_OP_TIMEOUT)
     except Exception as e:  # noqa: BLE001
         logger.warning("Reload after the solve failed: %s", e)
     return True
@@ -688,7 +706,7 @@ def _fetch_one_page(session, args, pool, page_num: int,
                 try:
                     session.bridge.run(session.page.goto(
                         url, {"waitUntil": "domcontentloaded",
-                              "timeout": 60000}))
+                              "timeout": 60000}), timeout=NAV_OP_TIMEOUT)
                     load_failed = False
                     break
                 except Exception as e:  # noqa: BLE001

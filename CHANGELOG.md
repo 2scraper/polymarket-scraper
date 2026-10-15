@@ -61,9 +61,10 @@ from a row count, it leads the section in a blockquote.
   recovered as exit 5. On the page that reproduced it, the run recovered on
   its third browser in 24 s and returned 77 markets; the previous code was
   still waiting three minutes in. On GitHub's runner the renderer instead
-  went silent for 3.5 minutes before crashing, so reading the document now
-  has its own 30 s bound and a page that cannot hand it over counts as the
-  browser failing. The Playwright and Selenium engines get the
+  went silent for 3.5 minutes before crashing, so every pyppeteer call is
+  now bounded at 30 s (90 s for a navigation, above pyppeteer's own 60 s)
+  instead of 120 s, and a call that misses its bound counts as the browser
+  failing. The Playwright and Selenium engines get the
   same treatment for a renderer crash or a lost session.
 - **A served page that parsed to nothing exited 4.** The Playwright engine
   detected it but nothing read the result, and the other two did not detect
