@@ -20,8 +20,11 @@ Three things are different about this ENGINE:
   built from the browser's OWN version (never a hardcoded literal), this
   engine truthfully announces `Chrome/117`. On a sibling site that was the
   difference between data and exit 3. Polymarket was measured serving
-  `curl/8.0` the full page, so it is not reading the client at all, and
-  `--chromium-path` is a convenience here rather than a requirement.
+  `curl/8.0` the full page, so it is not reading the client at all. The
+  build's age matters for stability instead: on GitHub's runners its
+  renderer crashed on most event pages (2026-10-09 to 10-15), and the
+  canary therefore runs this engine with `--chromium-path` pointing at an
+  installed Chromium. Without the flag the bundled build is used.
 
 * **pyppeteer is effectively unmaintained** and its own README points at
   Playwright. It is here for parity and for anyone already committed to it.
@@ -1238,12 +1241,14 @@ def parse_args():
                    help="Output file prefix")
     p.add_argument("--chromium-path", default=None, metavar="PATH",
                    help="Use the browser at PATH instead of pyppeteer's own "
-                        "Chromium. A convenience on this site rather than a "
-                        "requirement: polymarket.com was measured serving a "
-                        "plain `curl/8.0` the full page, so a two-year-old "
-                        "bundled Chromium is served too. e.g. "
+                        "Chromium (build 117). Unset, the bundled build is "
+                        "used as before. The site serves that build, but on "
+                        "GitHub's runners its renderer crashed on most event "
+                        "pages (2026-10-09 to 10-15) while a current "
+                        "Chromium read them, so the canary passes this flag. "
+                        "e.g. /usr/bin/chromium, /usr/bin/google-chrome or "
                         "'/Applications/Google Chrome.app/Contents/MacOS/"
-                        "Google Chrome' or /usr/bin/google-chrome.")
+                        "Google Chrome'.")
     p.add_argument("--proxy", default=None,
                    help="Proxy URL. Credentials are sent over CDP "
                         "(page.authenticate), never on the command line.")

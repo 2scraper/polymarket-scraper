@@ -336,7 +336,7 @@ A page carrying no widget is reported unsolved rather than charged for, and
 |---|---|
 | `playwright_scraper.py` | **primary.** The only one with the worker pool for `--mode events`. `playwright install chromium` is enough here — the bundled Chromium was served every page tried. |
 | `selenium_scraper.py` | parity. Cannot authenticate a proxy (`--proxy-server` has nowhere to put a password) and cannot attach to an authenticated CDP endpoint. |
-| `puppeteer_scraper.py` | parity, via pyppeteer. Downloads its own Chromium (build 117.0.5938.0, two years old). On GitHub's runners that build's renderer crashed on most event pages in the daily cross-engine canary (2026-10-09 to 10-14); a crash is now reported as a browser failure (exit 5), not as a block. `--chromium-path` pointing at an installed Chrome or Chromium is the first thing to try. |
+| `puppeteer_scraper.py` | parity, via pyppeteer. Downloads its own Chromium (build 117.0.5938.0, two years old). On GitHub's runners that build's renderer crashed on most event pages in the daily cross-engine canary (2026-10-09 to 10-15); a crash is now reported as a browser failure (exit 5), not as a block. `--chromium-path PATH` runs the engine on an installed Chrome or Chromium instead (without it, the bundled build is used as before). On 2026-10-15 Chromium 153 and 154 read the same event page through this engine, and the canary now passes the flag with the Chromium that Playwright installs. |
 | `scraper_api_client.py` | no browser at all — one HTTP request per page through 2Captcha's Scraper API. |
 
 Flags not every engine takes: `--browser-channel` is Playwright-only,
@@ -439,6 +439,10 @@ reprices continuously, so what must match is which markets were found, what
 the columns are called, and every field a market does not change by trading.
 Measured 2026-10-09 on one event page: the same five markets, the same forty
 columns, and `scraped_at` the only field that differed between engines.
+
+The pyppeteer run in that job uses `--chromium-path` with the Chromium the
+job installs for Playwright, because pyppeteer's own build 117 crashed on the
+runners. The flag is optional everywhere else.
 
 ---
 

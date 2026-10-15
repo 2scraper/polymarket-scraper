@@ -3415,6 +3415,68 @@ def test_a_dead_browser_is_not_a_block(skips):
     return ok
 
 
+def test_pyppeteer_runs_on_the_browser_it_is_given(skips):
+    group("pyppeteer: --chromium-path picks the browser, and the canary uses it")
+    ok = True
+    # The bundled Chromium 117 crashed its renderer on most event pages on
+    # GitHub's runners, so a canary that ran it was testing that build, not
+    # this engine. The canary passes --chromium-path; checked on the
+    # command itself (up to the last continued line), not anywhere in the
+    # file, so a flag left in a comment or an echo does not satisfy it.
+    path = os.path.join(REPO_ROOT, ".github", "workflows", "canary.yml")
+    if os.path.exists(path):
+        canary = open(path, encoding="utf-8").read()
+        commands = re.findall(
+            r"bin/python\s+puppeteer_scraper\.py(?:[^\n]*\\\n)*[^\n]*",
+            canary)
+        ok &= check("the canary runs puppeteer_scraper.py", bool(commands))
+        ok &= check("...and every such run passes --chromium-path",
+                    bool(commands)
+                    and all("--chromium-path" in c for c in commands))
+    elif os.path.exists(os.path.join(REPO_ROOT, ".github")):
+        ok &= check("the canary workflow exists", False)
+
+    try:
+        import puppeteer_scraper as pyp
+    except ImportError as e:
+        skips.append(f"puppeteer_scraper ({e})")
+        return ok
+
+    class _Stop(Exception):
+        pass
+
+    seen = []
+
+    async def _fake_launch(**kwargs):
+        seen.append(kwargs)
+        raise _Stop()
+
+    saved = pyp.launch
+    pyp.launch = _fake_launch
+    bridge = pyp._AsyncBridge()
+    try:
+        for given in (None, "/opt/stub/chromium"):
+            args = _stub_args("unused")
+            args.chromium_path = given
+            seen.clear()
+            try:
+                pyp._Session(bridge, args, None).open()
+            except _Stop:
+                pass
+            got = seen[0].get("executablePath") if seen else "<not launched>"
+            if given is None:
+                ok &= check("without the flag, pyppeteer's own Chromium is "
+                            "launched (no executablePath)",
+                            bool(seen) and "executablePath" not in seen[0])
+            else:
+                ok &= check("with the flag, that path is launched (%r)" % got,
+                            got == given)
+    finally:
+        pyp.launch = saved
+        bridge.close()
+    return ok
+
+
 def test_parser_failure_is_reported_by_every_engine():
     group("A served page that parses to nothing is a parser failure")
     ok = True
@@ -3622,6 +3684,7 @@ def main() -> int:
     ok &= test_scraper_api_payload_and_status()
     ok &= test_one_solve_allowance_per_page(skips)
     ok &= test_a_dead_browser_is_not_a_block(skips)
+    ok &= test_pyppeteer_runs_on_the_browser_it_is_given(skips)
     ok &= test_parser_failure_is_reported_by_every_engine()
     ok &= test_csv_formula_cells_are_neutralised()
     ok &= test_no_private_citations()

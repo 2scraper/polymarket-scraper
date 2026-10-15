@@ -66,6 +66,13 @@ from a row count, it leads the section in a blockquote.
   instead of 120 s, and a call that misses its bound counts as the browser
   failing. The Playwright and Selenium engines get the
   same treatment for a renderer crash or a lost session.
+- **The cross-engine canary was testing pyppeteer's old Chromium, not the
+  engine.** It now runs `puppeteer_scraper.py` with `--chromium-path` set
+  to the Chromium the job installs for Playwright. Locally on 2026-10-15,
+  Chromium 153 and 154 both read an event page through this engine (exit 0,
+  every row priced). The flag already existed, and with it unset the bundled
+  build is still used. Its `--help` text no longer calls it merely a
+  convenience.
 - **A served page that parsed to nothing exited 4.** The Playwright engine
   detected it but nothing read the result, and the other two did not detect
   it at all.

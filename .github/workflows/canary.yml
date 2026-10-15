@@ -383,10 +383,28 @@ jobs:
             --url "${{ steps.pick.outputs.url }}" \
             --mode event --format json --out cross_selenium
           echo "selenium_scraper.py exited $?"
-          timeout 600 .venv-puppeteer/bin/python puppeteer_scraper.py \
-            --url "${{ steps.pick.outputs.url }}" \
-            --mode event --format json --out cross_puppeteer
-          echo "puppeteer_scraper.py exited $?"
+          # pyppeteer gets an installed Chromium through --chromium-path,
+          # not its own download. Its bundled build (117) crashed its
+          # renderer on most event pages on GitHub's runners (2026-10-09 to
+          # 10-15), so the job was testing that old build rather than the
+          # engine's code. The browser used is the Chromium the step above
+          # installed for Playwright. If it cannot be found the engine is
+          # not run, and the comparison below fails on the missing output.
+          chromium=$(.venv-playwright/bin/python -c "
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p:
+              print(p.chromium.executable_path)
+          ")
+          if [ -z "$chromium" ] || [ ! -x "$chromium" ]; then
+            echo "::error::No installed Chromium found for puppeteer_scraper.py --chromium-path."
+          else
+            echo "puppeteer_scraper.py uses $chromium"
+            timeout 600 .venv-puppeteer/bin/python puppeteer_scraper.py \
+              --url "${{ steps.pick.outputs.url }}" \
+              --mode event --format json --out cross_puppeteer \
+              --chromium-path "$chromium"
+            echo "puppeteer_scraper.py exited $?"
+          fi
           exit 0
 
       - name: The three must agree on ids and schema
