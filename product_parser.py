@@ -3,7 +3,7 @@ product_parser.py
 ------------------
 Everything this repo knows about Polymarket. The engines, the writers, the
 proxy pool and the solver are family code and know nothing about this site;
-if you are writing site knowledge anywhere else, it belongs here (§1).
+if you are writing site knowledge anywhere else, it belongs here.
 
 What Polymarket is, in the two sentences a parser needs
 ------------------------------------------------------
@@ -24,7 +24,7 @@ Three views of the same markets, in this order
    "$19M". Measured 2026-09-16: 20 events / 94 markets on `/predictions`,
    20 / 70 on `/predictions/crypto`, 1 / 5 on the Fed event page.
 
-   Counted FIRST, before writing any of this, as §15 says to: there ARE
+   Counted FIRST, before writing any of this, as the family rule says to: there ARE
    `application/ld+json` blocks here (4 to 6 per page), which on most sites
    would make them the primary path. They are not, and the reason is in
    the next paragraph.
@@ -40,7 +40,7 @@ Three views of the same markets, in this order
    `ItemList` — and its `offers.price` is **"0"** on every capture taken,
    for markets trading at 0.07 and 0.88. That is a placeholder, not a price,
    and a parser that ported the listing's JSON-LD read to detail pages would
-   write zero into every row while every other column looked right (§20).
+   write zero into every row while every other column looked right.
    `_jsonld_prices` therefore only reads ItemList nodes.
 
 3. **The rendered DOM (fallback only).** Anchored on the URL pattern
@@ -68,7 +68,7 @@ cursor — and nothing in the UI ever asks for the next page. Measured
 So `page_url()` returns None and `--concurrency` above 1 is refused in the
 listing modes, with the reason. `--mode events` is how this repo gets depth:
 page 1 is the listing, and pages 2..N are the event pages page 1 named — real
-independent addresses, which is exactly the shape §7 describes when it says
+independent addresses, which is exactly the shape the family rule describes when it says
 page 1 is fetched alone because its content decides whether the rest can be
 addressed.
 
@@ -103,7 +103,7 @@ logger = logging.getLogger("product_parser")
 # Hosts, locales and URLs
 # ===========================================================================
 # One host. Taken from the site's own `<link rel="alternate" hreflang=…>`
-# set rather than guessed (§5) — which is what showed that the eighteen
+# set rather than guessed — which is what showed that the eighteen
 # locales are PATHS (`https://polymarket.com/es/predictions`) and not hosts,
 # so there is no per-country host table here to get wrong.
 HOSTS = ("polymarket.com", "www.polymarket.com")
@@ -118,7 +118,7 @@ LOCALES = ("bn", "de", "es", "fr", "hi", "id", "it", "ja", "pl", "pt", "ru",
 # market — with its own markets, its own prices and its own site. It is not
 # a locale of this one and this parser does not read it. Named here so that
 # `unsupported_reason` can say WHY rather than "not a Polymarket site",
-# which is false and sends the reader looking for a typo (§5).
+# which is false and sends the reader looking for a typo.
 SIBLING_VENUE_HOSTS = ("polymarket.us", "www.polymarket.us")
 
 
@@ -334,7 +334,7 @@ def unsupported_reason(url: str) -> Optional[str]:
 
     Says WHICH thing is wrong. "polymarket.us is a different venue" sends a
     reader to the right place; "not a Polymarket site" sends them looking for
-    a typo in a URL that has none (§5).
+    a typo in a URL that has none.
     """
     if not url:
         return "no URL given"
@@ -369,7 +369,7 @@ def redirected_away(requested: str, final: str) -> Optional[str]:
       `/predictions?_q=x`   -> `/predictions/x` a SEARCH turned into a TAG
                               listing, which is a different set of events
 
-    The third is the one this reports. It is the shape §7 warns about: page 1
+    The third is the one this reports. It is the shape the family rule warns about: page 1
     answered a different address than the one asked for, so any conclusion
     drawn about the requested listing is about some other listing.
     """
@@ -423,7 +423,7 @@ def page_url(url: str, page: int) -> Optional[str]:
     Returning a constructed `?page=2` would be worse than returning nothing:
     the site answers it with HTTP 200 and page 1, so a run that trusted it
     would find no new sku, conclude the listing was exhausted, and report a
-    COMPLETE run holding one page (§18). `--mode events` plans its pages from
+    COMPLETE run holding one page. `--mode events` plans its pages from
     page 1's own data instead, in `event_urls_from`.
     """
     return url if page <= 1 else None
@@ -432,7 +432,7 @@ def page_url(url: str, page: int) -> Optional[str]:
 def event_urls_from(rows: Iterable[Market], limit: Optional[int] = None) -> List[str]:
     """The event pages this listing named, in listing order, deduplicated.
 
-    This is `--mode events`' page plan, and it is the reason §7's "page 1 is
+    This is `--mode events`' page plan, and it is the reason the family's "page 1 is
     always fetched alone" is literally true here rather than a convention:
     page 5's address is not merely unknown until page 4 loads, it does not
     exist until page 1 is parsed.
@@ -475,7 +475,7 @@ def concurrency_refusal(url: str = "", mode: str = "") -> Optional[str]:
 # The payload is read before any of this. These exist for the case where a
 # page rendered its tiles and shipped a payload shape this parser could not
 # read, which is the one failure mode a payload-only parser cannot report
-# honestly (§20: a page that was SERVED, links to N markets and parses to
+# honestly (a page that was SERVED, links to N markets and parses to
 # zero rows is our bug, not an empty category).
 #
 # Anchored on the URL PATTERN and not on a class. Polymarket's classes are
@@ -498,10 +498,10 @@ SELECTORS: Dict[str, str] = {
 
 # How many event links mean "this page has rendered". Must be > 1: waiting
 # for one match resolves on the site's own navigation long before the grid
-# paints, and this site's navigation links five listings above the fold (§5).
+# paints, and this site's navigation links five listings above the fold.
 MIN_CARD_MATCHES = 2
 
-# Deliberately empty, and this is the measured version of §7's warning rather
+# Deliberately empty, and this is the measured version of the family's warning rather
 # than an omission: Polymarket publishes no `link[rel=next]`, no numbered
 # anchor and no next control anywhere. A selector here would be a third dead
 # `NEXT_PAGE_SELECTOR` of the kind that let a sibling repo fetch one page of
@@ -510,7 +510,7 @@ NEXT_PAGE_SELECTOR = ""
 
 # How far the DOM fallback may widen from a link to its tile. A malformed
 # document must not let the walk reach <body> and read the whole page as one
-# tile (§4).
+# tile.
 _WIDEN_CAP = 8
 
 
@@ -530,7 +530,7 @@ def count_cards(html: Optional[str]) -> int:
     Distinct, not links: a tile links its event two or three times (an
     invisible overlay anchor, the title, the comment count), so counting
     links reports a twenty-event page as thirty-two and a readiness wait for
-    thirty-two never resolves (§4).
+    thirty-two never resolves.
     """
     if not html:
         return 0
@@ -621,7 +621,7 @@ def _enclosing_object(payload: str, key_pos: int) -> Optional[Tuple[int, int, di
 
     Nothing about that is visible to a smaller test: the desync happens in a
     script tag hundreds of kilobytes before the data. What catches it is
-    running the thing (§15) and keeping a fixture of the page that broke it.
+    running the thing and keeping a fixture of the page that broke it.
     """
     lowest = max(0, key_pos - _MAX_OBJECT_BYTES)
     cursor = key_pos
@@ -675,7 +675,7 @@ def _results_arrays(payload: str) -> List[List[dict]]:
     infinite query. Preferred over every event object found loose in the
     payload because a listing page also ships the trending rail and the
     related-events strip, and a run for `/politics` that emitted those would
-    be reporting a sidebar as part of the listing. That is §4's junk-link
+    be reporting a sidebar as part of the listing. That is the family's junk-link
     data theft, seen from the payload side: 41 event objects on that capture
     against the 20 the grid actually holds.
     """
@@ -696,7 +696,7 @@ def total_events(html: Optional[str]) -> Optional[int]:
     """The site's own count of everything the listing could show.
 
     21,511 for `/predictions` against the 20 it ships. NOT a per-page gap and
-    never used as one (§8's rank arithmetic does not apply here — this is the
+    never used as one (the family's rank arithmetic does not apply here — this is the
     whole catalogue, not this page's share of it). It goes in the sidecar
     beside what the run actually read, which is what makes the difference
     visible rather than assumed.
@@ -706,7 +706,7 @@ def total_events(html: Optional[str]) -> Optional[int]:
         # An event page ships a `totalCount` too — 372 on one capture — and
         # it belongs to the rail of related events beside the market, not to
         # anything this run asked for. A number read off the wrong container
-        # is worse than no number (§13).
+        # is worse than no number.
         return None
     match = re.search(r'"totalCount"\s*:\s*(\d+)', payload)
     return int(match.group(1)) if match else None
@@ -965,7 +965,7 @@ def markets_from_flight(html: Optional[str], base_url: str = "") -> List[Market]
     is not a detail: an event page ships the markets of its own event AND of
     everything in its rails — the Clarity Act page, a single-market event,
     carries twenty-one market objects, and the Fed page twenty-five for its
-    five markets. Emitting those would be §4's junk-link data theft with no
+    five markets. Emitting those would be the family's junk-link data theft with no
     junk link involved: a run for one event would report four other events'
     prices as if they were its own.
 
@@ -1072,7 +1072,7 @@ def jsonld_blocks(html: Optional[str]) -> List[Any]:
 def _jsonld_nodes(blocks: Iterable[Any]) -> List[dict]:
     """Flatten `@graph`, top-level lists and single objects into one list.
 
-    `@graph` is here because §4 names it as the shape that returns zero
+    `@graph` is here because the family rule names it as the shape that returns zero
     products in silence when it is not handled. Polymarket does not use it
     today — five of five blocks on every capture are plain objects — and the
     four lines that would find it if it appeared cost nothing.
@@ -1098,7 +1098,7 @@ def jsonld_prices(html: Optional[str]) -> Dict[str, Tuple[Optional[float], Optio
     `"offers": {"price": "0"}` — zero, on every capture taken, for markets
     trading at 0.07 and 0.88. Reading it would write a placeholder into the
     `price` of every row of every event run while the rest of the row looked
-    correct, which is the exact shape of §20's detail-page finding.
+    correct, which is the exact shape of the family's detail-page finding.
 
     The price it does give is the event's FIRST market, which is what the
     caller matches it against.
@@ -1122,7 +1122,7 @@ def jsonld_prices(html: Optional[str]) -> Dict[str, Tuple[Optional[float], Optio
             offers = entity.get("offers")
             # `offers` is legal as null, as a dict and as a list, and a
             # `.get()` default does not save you from the first of those
-            # (§4). All three are handled rather than assumed away.
+            #. All three are handled rather than assumed away.
             if isinstance(offers, list):
                 offers = next((o for o in offers if isinstance(o, dict)), None)
             if not isinstance(offers, dict):
@@ -1140,11 +1140,11 @@ def jsonld_currency(html: Optional[str]) -> Optional[str]:
     the currency beside it is not useless and is not otherwise published
     anywhere on the page. Taking one field of a node and refusing another is
     deliberate: `price` there is a placeholder and `priceCurrency` is a fact,
-    and the way to know which is which is to have looked at both (§19's rule
+    and the way to know which is which is to have looked at both (the family's rule
     about re-reading what a payload actually returns).
 
     Returns None rather than a defaulted "USD" when the page states nothing
-    (§8: never present a guess as a fact).
+    (never present a guess as a fact).
     """
     found = set()
     for node in _jsonld_nodes(jsonld_blocks(html)):
@@ -1208,7 +1208,7 @@ def _tile_of(anchor: Any) -> Any:
     anchor with the title as its `aria-label`, the title itself, and the
     comment count with a `#commentsInner` fragment — so a walk that stopped
     at "more than one event link" would never leave the anchor and would read
-    no price at all (§4). Stopping one level too LATE is the worse failure:
+    no price at all. Stopping one level too LATE is the worse failure:
     the tile would then report its neighbour's volume.
     """
     node, tile = anchor, anchor
@@ -1238,7 +1238,7 @@ def markets_from_dom(html: Optional[str], base_url: str = "") -> List[Market]:
     DIFFERENT MARKETS, not two views of one. The Fed tile renders "88% · 25
     bps increase" — the event's leading outcome — while the ItemList
     publishes 0.12, which is its "No change" market. Overlaying one onto the
-    other would write a confident wrong price (§4).
+    other would write a confident wrong price.
 
     Every row from here carries `data_source="dom"` and is keyed by the EVENT
     slug, because the DOM publishes no market id anywhere.
@@ -1261,7 +1261,7 @@ def markets_from_dom(html: Optional[str], base_url: str = "") -> List[Market]:
         # An anchor whose tile is the anchor itself carried no tile at all —
         # a navigation link, a footer link, a rail. Skipped rather than
         # emitted as a row with every column null but the URL, which is what
-        # a sibling repo shipped for a week (§4).
+        # a sibling repo shipped for a week.
         if tile is anchor or not text:
             continue
         seen.add(slug)
@@ -1305,7 +1305,7 @@ def _dom_category(tile: Any) -> Optional[str]:
 # from a datacentre exit contained **zero** markers of any vendor: no
 # reCAPTCHA, hCaptcha, Turnstile, DataDome, PerimeterX, Incapsula, Kasada or
 # AWS WAF, no challenge iframe, no `data-sitekey`, and no `*_SITE_KEY` in any
-# page config. So no challenge was MET — which §18 is careful to say is not
+# page config. So no challenge was MET — which the family rule is careful to say is not
 # the same as none being configured. Cloudflare's managed challenge is one
 # request away at any time, it renders a Turnstile, and this repo implements
 # the interception and the solve for exactly that (`captcha_solver.py`,
@@ -1339,7 +1339,7 @@ _EXTENSION_SCRIPT_RE = re.compile(
 # How much of a document to unescape before matching. A refusal page is a few
 # hundred bytes of furniture; a served listing is 750 KB of grid. Unescaping
 # the whole of the second buys nothing and risks a market question reading as
-# a marker (§20).
+# a marker.
 _MARKER_PREFIX_BYTES = 200_000
 
 
@@ -1349,7 +1349,7 @@ def _marker_haystack(html: str) -> str:
     Entities are unescaped over a bounded prefix because an edge can serve
     the SAME refusal page two ways — `https&#58;&#47;&#47;host` to an HTTP
     client and `https://host` to a browser — and a literal marker then
-    matches the three browser engines and silently misses the HTTP one (§20).
+    matches the three browser engines and silently misses the HTTP one.
     """
     trimmed = html[:_MARKER_PREFIX_BYTES]
     stripped = _EXTENSION_SCRIPT_RE.sub(" ", trimmed)
@@ -1376,9 +1376,9 @@ def detect_bot_challenge(html: Optional[str]) -> Optional[str]:
 # does serve — and absent from anything that is not Polymarket's HTML.
 #
 # This is the structural "was this built out of the site's own assets?" test
-# §8 arrived at, and it answers the case a marker list cannot: Chromium's own
+# the family rule arrived at, and it answers the case a marker list cannot: Chromium's own
 # network-error page carries the site's HOSTNAME in its `<title>`, no vendor
-# marker of any kind, and `ERR_PROXY_CONNECTION_FAILED` in a div (§18). A
+# marker of any kind, and `ERR_PROXY_CONNECTION_FAILED` in a div. A
 # title check calls that a real page; this does not.
 _SITE_ROOT_MARKERS = ("__pm_html", "/_next/static/")
 
@@ -1392,7 +1392,7 @@ def served_by_polymarket(html: Optional[str]) -> bool:
 
 # This used to carry two text markers — the site's "page not found" wording —
 # described here as an UNAMBIGUOUS POSITIVE SIGNAL. They were neither, and
-# §18's rule is the one that settles it: count a candidate marker on a page
+# The family's rule is the one that settles it: count a candidate marker on a page
 # you know is good, and if it appears there it is not a marker, it is a fact
 # about the site.
 #
@@ -1457,7 +1457,7 @@ def _confirm_with_jsonld(rows: List[Market], html: Optional[str]) -> Tuple[int, 
     markets it belongs to is not stated anywhere. On a two-outcome event it
     is the first; on a sports event it is the leading side — the ItemList
     said 1.0 for a settled match whose first market was 0.0, on seven events
-    of one capture. So the check is the one §4 specifies for exactly this
+    of one capture. So the check is the one the family rule specifies for exactly this
     situation: the structured price must be AMONG the event's market prices.
     If it is, the matching row is marked `flight+jsonld`. If it is not, the
     two views disagree about which market this is, the row is left alone and
@@ -1514,7 +1514,7 @@ def parse_markets(html: str, url: str, page: int = 1,
     `page` is threaded through rather than defaulted, because `position`
     restarts at 1 on every page: without the page number beside it a row from
     page 2 claims the same position as one from page 1 and the two are
-    indistinguishable in the output (§18).
+    indistinguishable in the output.
     """
     base = normalize_url(url)
     rows = markets_from_flight(html, base)
@@ -1527,7 +1527,7 @@ def parse_markets(html: str, url: str, page: int = 1,
             # The page rendered its tiles and shipped a payload this parser
             # could not read. That is a bug here, not an empty listing, and
             # saying so is the difference between a reader checking the URL
-            # and a reader checking this file (§20).
+            # and a reader checking this file.
             logger.warning(
                 "Read %d row(s) from the rendered DOM because the page's own "
                 "payload produced none. These rows are EVENT-level: the DOM "
@@ -1573,7 +1573,7 @@ parse_products = parse_markets
 def page_gap(html: Optional[str], parsed: int) -> Optional[int]:
     """None, always, on this site — and the None is the point.
 
-    §8's rank arithmetic applies where a site NUMBERS its items: 30 rows
+    The family's rank arithmetic applies where a site NUMBERS its items: 30 rows
     spanning ranks 1-50 proves 20 cards never loaded. Polymarket numbers
     nothing. Its `totalCount` is the size of the whole catalogue (21,511
     against a page of 20), so reading it as a gap would claim 21,491 missing
@@ -1589,7 +1589,7 @@ def page_gap(html: Optional[str], parsed: int) -> Optional[int]:
 # What kind of answer did we just get?
 # ===========================================================================
 # Five states, and four of them want a different response. The order the
-# checks run in is the whole design, and it is §17's lesson rather than a
+# checks run in is the whole design, and it is the family's lesson rather than a
 # preference: an UNAMBIGUOUS POSITIVE SIGNAL is stronger than a threshold, so
 # the site's own "Page not found" and the site's own market data are both
 # read before anything that counts markers or references.
@@ -1638,14 +1638,14 @@ def detect_page_state(html: Optional[str], status: Optional[int] = None,
 
     # 1. The site's own data, and it goes FIRST. A page that names markets IS
     #    content, whatever else is on it — a vendor marker in a script bundle
-    #    (§18), or, as this site turned out to do, a 404 template inlined in
+    #, or, as this site turned out to do, a 404 template inlined in
     #    the payload of every page it serves.
     #
     #    This check used to sit SECOND, behind a not-found text marker that
     #    fired on 17 of 20 healthy event pages, and the ordering is why that
     #    mistake was able to cost anything: the signal that PROVES the page
     #    is good was never consulted, because a weaker one had already
-    #    answered. §17 states the rule as "order the signals by how much they
+    #    answered. the family rule states the rule as "order the signals by how much they
     #    prove, not by how cheap they are"; this is that, with the stronger
     #    signal also being the cheap one.
     payload = flight_payload(html)
@@ -1667,7 +1667,7 @@ def detect_page_state(html: Optional[str], status: Optional[int] = None,
         return "challenge" if is_challenge_page(html) else "blocked"
 
     # 4. Served by Polymarket, and nothing on it yet. Wants a WAIT rather
-    #    than a refetch — which is the state §18 says a search grid needs on
+    #    than a refetch — which is the state the family rule says a search grid needs on
     #    a site whose page kinds render differently, and the state a
     #    too-early snapshot lands in here.
     if served_by_polymarket(html):
@@ -1677,7 +1677,7 @@ def detect_page_state(html: Optional[str], status: Optional[int] = None,
     #    network-error page lands here: it carries `<title>polymarket.com
     #    </title>` — the SITE'S OWN HOSTNAME, so a title check would call it
     #    a real page — no vendor marker at all, and `ERR_PROXY_CONNECTION_
-    #    FAILED` in a div no marker list would know (§18). Asking whether the
+    #    FAILED` in a div no marker list would know. Asking whether the
     #    page was built out of the site's own assets is what answers it.
     if status is not None and status >= 400:
         return "blocked"

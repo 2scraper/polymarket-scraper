@@ -143,6 +143,9 @@ class PageOutcome:
     products: List = field(default_factory=list)
     blocked_by: Optional[str] = None
     load_failed: bool = False
+    # Set when the BROWSER failed (a crashed page, a closed connection)
+    # rather than the site: such a page is a fetch failure, not a block.
+    browser_failure: Optional[str] = None
     state: Optional[str] = None
     # See the Playwright engine for why this is NOT a per-page counter.
     total_events: Optional[int] = None
@@ -167,8 +170,10 @@ class _Session:
         self.args, self.pool = args, pool
         self.remote = bool(args.cdp_endpoint)
         self.driver = None
+        self.browser_failure: Optional[str] = None
 
     def open(self):
+        self.browser_failure = None
         options = Options()
         if self.remote:
             options.debugger_address = _cdp_host_port(self.args.cdp_endpoint)
@@ -213,7 +218,7 @@ class _Session:
         # refused responses — see `_refused_count`. It has to be
         # asked for at driver creation; there is no way to turn it on later.
         # Without it this engine would report `complete` where its twins
-        # report `partial` on the identical run (§6).
+        # report `partial` on the identical run.
         options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
 
         self.driver = webdriver.Chrome(options=options)
@@ -249,7 +254,7 @@ class _Session:
         # which defeats the flag rather than breaking it, because the run
         # then presents a Windows fingerprint's screen, locale and timezone
         # over a local Chromium's UA. That is the identity MISMATCH the flag
-        # exists to avoid (§16, where the same defect was live in four
+        # exists to avoid (where the same defect was live in four
         # sibling repos at once).
         from fingerprint_client import (get_fingerprint, fingerprint_user_agent,
                                         playwright_init_script)
@@ -283,7 +288,7 @@ class _Session:
         Selenium spells it `Page.addScriptToEvaluateOnNewDocument` over CDP;
         the other two engines spell the same thing `add_init_script` and
         `evaluateOnNewDocument`, which is why this cannot live in the shared
-        module (§1).
+        module.
 
         Harmless where there is no Turnstile — every page measured on this
         site so far — because it wraps a function that never appears and
@@ -319,7 +324,7 @@ class _Session:
 # Only "how to ask this driver" lives here. Note the JS dialect: Selenium's
 # execute_script runs a function BODY and needs an explicit `return`, unlike
 # the `() => expr` both other engines take — which is exactly why page_flow
-# names operations instead of passing JavaScript across the boundary (§1).
+# names operations instead of passing JavaScript across the boundary.
 def _count(session, selector: str) -> int:
     try:
         return len(session.driver.find_elements(By.CSS_SELECTOR, selector))
@@ -332,10 +337,21 @@ def _sleep(ms: int) -> None:
     time.sleep(ms / 1000.0)
 
 
+# What chromedriver says when the BROWSER, not the site, has failed.
+_BROWSER_DEAD_MARKERS = ("tab crashed", "invalid session id",
+                         "disconnected", "chrome not reachable")
+
+
 def _content(session) -> Optional[str]:
     try:
         return session.driver.page_source
     except WebDriverException as e:
+        message = str(e).lower()
+        if any(m in message for m in _BROWSER_DEAD_MARKERS):
+            # Recorded for the fetch loop, which reports a dead browser as a
+            # fetch failure (exit 5) rather than classifying the missing
+            # document as a site block (exit 3).
+            session.browser_failure = str(e).splitlines()[0][:160]
         logger.debug("page_source unavailable (page navigating?): %s", e)
         return None
 
@@ -346,7 +362,7 @@ def _scroll_to_bottom(session) -> None:
     Note the dialect: Selenium's `execute_script` takes a function BODY with
     an explicit `return`, where Playwright and pyppeteer take `() => expr`.
     That difference is exactly why `page_flow` names the OPERATION and each
-    engine spells it itself (§1).
+    engine spells it itself.
     """
     try:
         session.driver.execute_script(
@@ -370,7 +386,7 @@ def _page_height(session) -> Optional[int]:
 # This is NOT a cosmetic difference. If this engine always answered 0, it
 # would report `complete` where its twins report `partial` on the identical
 # run, and that is precisely the drift the shared modules exist to prevent
-# (§6). The log has to be ENABLED at driver creation; see `_Session.open`.
+#. The log has to be ENABLED at driver creation; see `_Session.open`.
 _SITE_HOST_FRAGMENT = "polymarket.com"
 
 
@@ -426,7 +442,7 @@ def _current_url(session) -> str:
 
 def _classify(session, html: str, status=None) -> str:
     # `status` is POSITIONAL and second. Two engines in a sibling repo passed
-    # it as a keyword and both crashed on their first fetch (§17); this
+    # it as a keyword and both crashed on their first fetch; this
     # repo's smoke suite binds every shared-module call in every engine
     # against the callee's real signature for that reason.
     return page_flow.classify(html, status, _current_url(session))
@@ -436,13 +452,14 @@ def _parse_for_mode(html: str, url: str, args, page_num: int = 1) -> List:
     return parse_markets(html, url, page=page_num, mode=args.mode)
 
 
-def handle_captcha_if_present(session, args) -> bool:
+def handle_captcha_if_present(session, args,
+                              budget: "page_flow.SolveBudget") -> bool:
     """Detect and solve a challenge. True if something was solved.
 
     Same contract and same reconciliation as the Playwright engine. No
     challenge was met on polymarket.com while this repo was built, so the
     path is UNEXERCISED here — which is a fact about this repo's testing and
-    never a claim that a captcha on this site could not be solved (§19).
+    never a claim that a captcha on this site could not be solved.
     """
     driver = session.driver
     html = _content(session)
@@ -493,6 +510,14 @@ def handle_captcha_if_present(session, args) -> bool:
     if not args.twocaptcha_key:
         logger.warning("No 2captcha API key, so this challenge cannot be "
                        "solved — continuing with whatever the page holds.")
+        return False
+    # The page's allowance is checked HERE, immediately before the money is
+    # spent, so both call sites in _fetch_one_page and every block retry draw
+    # on the same one. See page_flow.SolveBudget.
+    if not budget.spend():
+        logger.warning("This page's solve allowance (%d) is spent — not "
+                       "buying another; continuing with whatever the page "
+                       "holds.", budget.limit)
         return False
     try:
         token = solve_recaptcha(challenge, args.twocaptcha_key,
@@ -568,7 +593,7 @@ def _fetch_one_page(session, args, pool, page_num: int,
     block_retries = 0 if not page_flow.RETRY_ON_BLOCKED else (
         args.proxy_block_retries if has_pool
         else page_flow.BLOCK_RETRIES_WITHOUT_POOL)
-    solves_bought = 0
+    budget = page_flow.SolveBudget()
     html, state, load_failed = None, "ok", False
 
     for block_attempt in range(block_retries + 1):
@@ -604,7 +629,7 @@ def _fetch_one_page(session, args, pool, page_num: int,
         if load_failed:
             break
 
-        if handle_captcha_if_present(session, args):
+        if handle_captcha_if_present(session, args, budget):
             _sleep(1000)
 
         html = _content(session) or ""
@@ -623,9 +648,8 @@ def _fetch_one_page(session, args, pool, page_num: int,
             state = _classify(session, html)
 
         if (page_flow.should_solve(state)
-                and solves_bought < page_flow.SOLVES_PER_PAGE):
-            solves_bought += 1
-            if handle_captcha_if_present(session, args):
+                and budget.allows()):
+            if handle_captcha_if_present(session, args, budget):
                 _sleep(1000)
                 html = _content(session) or html
                 state = _classify(session, html)
@@ -636,6 +660,22 @@ def _fetch_one_page(session, args, pool, page_num: int,
                     logger.warning("The solve was NOT accepted: page %d is "
                                    "still %s. The purchase is spent.",
                                    page_num, state)
+
+        if session.browser_failure:
+            # The browser died under the fetch. What is left is not an
+            # answer from the site, so it must not be classified as a block.
+            outcome.browser_failure = session.browser_failure
+            load_failed = True
+            if not session.remote and block_attempt < block_retries:
+                logger.warning(
+                    "Page %d: %s. That is this engine's browser failing, not "
+                    "the site refusing — relaunching it and fetching again "
+                    "(%d/%d).", page_num, session.browser_failure,
+                    block_attempt + 1, block_retries)
+                session.relaunch()
+                continue
+            break
+        outcome.browser_failure = None
 
         if not page_flow.should_retry(state):
             break
@@ -651,13 +691,13 @@ def _fetch_one_page(session, args, pool, page_num: int,
                 session.relaunch()
                 time.sleep(pause)
             else:
-                # No pool, so nowhere else to go. What DOES clear it here is
-                # a FRESH browser context: 9 of 27 first attempts were
-                # challenged and all 9 were served on the next attempt in a
-                # new context, while waiting inside the same context cleared
-                # none. `page_flow.RETRY_NEEDS_FRESH_CONTEXT` says so, and a
+                # No pool, so nowhere else to go. What has cleared a
+                # challenge on sibling sites is a FRESH browser context rather
+                # than a reload; nothing was refused on this site while it
+                # was measured, so that is the family's rule, not a figure
+                # from here. `page_flow.RETRY_NEEDS_FRESH_CONTEXT` says so, and a
                 # constant no engine consulted would be dead policy dressed
-                # up as enforcement (§17).
+                # up as enforcement.
                 #
                 # NOT relaunched over --cdp-endpoint: a Scraping Browser
                 # profile allows one live connection, so reconnecting risks
@@ -668,7 +708,7 @@ def _fetch_one_page(session, args, pool, page_num: int,
                                "re-fetching %s (%d/%d).",
                                page_num, state, pause,
                                "in a FRESH browser context, which is what "
-                               "clears this site's challenge" if fresh
+                               "clears a challenge on sibling sites (not measured on this one)" if fresh
                                else "through the same access path",
                                block_attempt + 1, block_retries)
                 time.sleep(pause)
@@ -682,7 +722,14 @@ def _fetch_one_page(session, args, pool, page_num: int,
                 break
 
     if load_failed:
-        logger.error("Gave up loading %s after %d attempt(s).", url, args.retries)
+        if outcome.browser_failure:
+            logger.error(
+                "Gave up on %s: %s, and a fresh browser did not get past it. "
+                "Nothing was read from the site, so this is a fetch failure "
+                "(exit 5), not a block.", url, outcome.browser_failure)
+        else:
+            logger.error("Gave up loading %s after %d attempt(s).", url,
+                         args.retries)
         outcome.load_failed = True
         return outcome
 
@@ -715,7 +762,7 @@ def _fetch_one_page(session, args, pool, page_num: int,
         # THE FAST PATH, and the normal one: the page's own payload has
         # arrived, so there is nothing to wait for and nothing to scroll.
         # Identical to the other two engines by construction — the test for
-        # it lives in page_flow (§6).
+        # it lives in page_flow.
         #
         # Gated on the payload ARRIVING rather than on it naming markets: a
         # payload that arrived with none is an answer, and spending the
@@ -796,8 +843,21 @@ def _fetch_one_page(session, args, pool, page_num: int,
             session.driver.save_screenshot(f"{args.out}_page{page_num}_debug.png")
         except WebDriverException as e:
             logger.warning("Could not capture screenshot: %s", e)
-        logger.warning("0 rows parsed — saved what the browser actually saw "
-                       "to %s.", debug_html)
+        if page_flow.parsed_nothing_from_a_served_page(html, len(products)):
+            # A page the site SERVED, linking to events, that parses to zero
+            # rows is this parser's failure and not an empty listing; the
+            # state is what scrape() turns into its stop reason.
+            outcome.state = page_flow.PARSER_FOUND_NOTHING
+            logger.error(
+                "0 rows parsed from a page the site SERVED, which links to "
+                "%d event(s). That is a parser regression rather than an "
+                "empty listing: the payload shape or the tile markup has "
+                "changed. Saved what the browser saw to %s — please open an "
+                "issue with it attached.",
+                page_flow.count_cards(html or ""), debug_html)
+        else:
+            logger.warning("0 rows parsed — saved what the browser actually "
+                           "saw to %s.", debug_html)
 
     outcome.products = products
     outcome.final_url = _current_url(session)
@@ -820,7 +880,7 @@ def scrape(args) -> int:
                        "the remote browser has its own exit.")
         pool = None
 
-    # Two shapes of pagination, and the MODE picks which (§7). In
+    # Two shapes of pagination, and the MODE picks which. In
     # --mode events page 1 is the LISTING and pages 2..N are the event pages
     # page 1 named — real independent addresses, but knowable only from page
     # 1's own data, which is why they are planned from `event_urls_from`
@@ -836,7 +896,7 @@ def scrape(args) -> int:
                            page_flow.concurrency_refusal(args.url, args.mode))
         else:
             # A DOCUMENTED ENGINE LIMIT, in the same class as this family's
-            # "Selenium cannot authenticate a remote CDP endpoint" (§6): the
+            # "Selenium cannot authenticate a remote CDP endpoint": the
             # worker pool is implemented in the Playwright engine only. Said
             # out loud rather than run as one worker quietly, which would
             # look like the flag did something.
@@ -852,13 +912,21 @@ def scrape(args) -> int:
         outcomes.append(first)
 
         if not first.ok:
-            stop_reason = ("page_load_timeout" if first.load_failed
-                           else f"blocked_{first.blocked_by}")
+            stop_reason = page_flow.failure_stop_reason(first)
             blocked = first.blocked_by is not None
+
+
+        elif first.state == page_flow.PARSER_FOUND_NOTHING:
+
+            # Served, links to events, and nothing parsed: a parser failure,
+
+            # reported as one (exit 5) rather than as an empty listing (exit 4).
+
+            stop_reason = page_flow.PARSER_FOUND_NOTHING
 
         elif plans_pages:
             seen_keys.update(p.sku for p in first.products if p.sku is not None)
-            # VERIFY before planning (§7). A search `?q=x` can land on the
+            # VERIFY before planning. A search `?q=x` can land on the
             # TAG listing `/predictions/x`, which is a different set of
             # events — and page 1's event URLs would then belong to that
             # other listing rather than to the one this run asked for.
@@ -888,8 +956,7 @@ def scrape(args) -> int:
                 outcome = _fetch_one_page(session, args, pool, page_num, url)
                 outcomes.append(outcome)
                 if not outcome.ok:
-                    stop_reason = ("page_load_timeout" if outcome.load_failed
-                                   else f"blocked_{outcome.blocked_by}")
+                    stop_reason = page_flow.failure_stop_reason(outcome)
                     blocked = outcome.blocked_by is not None
                     break
                 seen_keys.update(p.sku for p in outcome.products
@@ -917,7 +984,7 @@ def scrape(args) -> int:
 
         else:
             seen_keys.update(p.sku for p in first.products if p.sku is not None)
-            # ONE page, and the run is COMPLETE holding it. §7's warning read
+            # ONE page, and the run is COMPLETE holding it. the family's warning read
             # from the other side: the single page is DELIBERATE, stated in
             # the log with the measurement behind it and recorded in the
             # sidecar as its own stop reason, so it can never be confused
@@ -933,7 +1000,7 @@ def scrape(args) -> int:
     # Merged in PAGE order, with a DEEPER reading of a market replacing a
     # shallower one in place — see output_writer.merge_pages. Identical to
     # the other two engines by construction, because the rule lives there
-    # rather than being written out three times (§6).
+    # rather than being written out three times.
     all_rows, fresh_by_batch, upgraded_by_page = merge_pages(
         [(o.page_num, o.products) for o in outcomes], key="sku")
     for page_num in sorted(fresh_by_batch):
@@ -998,7 +1065,7 @@ def scrape(args) -> int:
         "locale": locale_of(final_url),
         # Byte-identical to the other two engines. A sidecar key that
         # differed between them would make two runs of the same URL look
-        # like two different pagination models (§6).
+        # like two different pagination models.
         "pagination": ("listing+event-pages" if args.mode == "events"
                        else "single-page"),
     }
@@ -1103,7 +1170,7 @@ def parse_args():
                         "the Challenge-page form. No challenge was met on "
                         "this site while it was written, so the path is "
                         "unexercised HERE — which is not a claim about what "
-                        "a solver can do (§19). A page carrying no widget is "
+                        "a solver can do. A page carrying no widget is "
                         "reported unsolved rather than charged for.")
     p.add_argument("--min-score", type=float, default=0.7,
                    help="reCAPTCHA v3 minimum score (0.3, 0.7 or 0.9).")
@@ -1117,7 +1184,7 @@ def parse_args():
                    help="Save the exact HTML the parser is given, on success "
                         "as well as failure.")
     # HEADLESS by default, and that is this site's own measurement rather
-    # than the family's habit. §19 says to measure headless against headful
+    # than the family's habit. the family rule says to measure headless against headful
     # once per site because a sibling repo found 0 of 4 against 4 of 4; here
     # the answer came back IDENTICAL — 20 events, the same twenty, on both.
     # The site also served a `curl/8.0` User-Agent the full 791,003 bytes,

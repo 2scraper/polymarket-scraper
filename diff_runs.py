@@ -58,7 +58,7 @@ from output_writer import UNIQUE_BY_SKU_MODES
 # here. Nothing failed: `diff_runs.py` simply compared eight fields that were
 # absent from every row of both runs and reported "no changes" for ever.
 # That is this family's most common bug shape — a tool doing less than it
-# says while reporting success (§16) — and it survived a green suite because
+# says while reporting success — and it survived a green suite because
 # the suite tested the DIFF's mechanics rather than its subject.
 #
 #   price / outcome_prices   the whole point. A prediction market IS its

@@ -301,6 +301,22 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
     return save(products, args.out, args.format, allow_empty=args.allow_empty)
 
 
+def _extra_attempts(value) -> int:
+    """argparse `type=` for this client's --retries: EXTRA attempts, so 0 is
+    legal (one request, no retry) and a negative number is a usage error
+    rather than being quietly read as 0."""
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError(
+            f"--retries must be an integer, not {value!r}")
+    if number < 0:
+        raise argparse.ArgumentTypeError(
+            f"--retries must be 0 or more, not {number}. Here it counts "
+            f"EXTRA attempts: 0 means one request and no retry.")
+    return number
+
+
 def parse_args():
     p = argparse.ArgumentParser(
         description="Polymarket market scraper — 2captcha Scraper API edition "
@@ -340,7 +356,7 @@ def parse_args():
     p.add_argument("--allow-empty", action="store_true",
                    help="Write output files even when 0 products were parsed. Off by "
                         "default so a failed fetch can't overwrite a good result.")
-    p.add_argument("--retries", type=int, default=1,
+    p.add_argument("--retries", type=_extra_attempts, default=1,
                    help="Extra attempts if a bot-challenge page comes back. One retry is "
                         "usually worth it. Each attempt is a separate billable task, so "
                         "this defaults to 1.")

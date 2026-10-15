@@ -47,7 +47,7 @@ Nothing is rewritten. This site's rows are questions about public events —
 meeting?" — with no person's prose and no session material in them. The
 checks below scan for both anyway, because the next capture may not be so
 tidy and the guard has to be a PATTERN rather than a memory of what was
-clean last time (§10).
+clean last time.
 
 What IS reduced is volume: a listing's `results` array is trimmed to the
 first few events and the JSON-LD's `itemListElement` to the same ones, so a
@@ -107,7 +107,7 @@ SOURCES = {
     # service's auto-solve extension injections as well as the site's own
     # markup. Every other capture here comes from a local browser or curl,
     # and a marker set is only tested against the way a real run fetches
-    # (§21: the check that should have caught this in a sibling repo passed
+    # (the check that should have caught this in a sibling repo passed
     # for the wrong reason, because its only fixture was curl-fetched).
     "cdp_extension":  ("cdp_scraping_browser.html",
                        "https://polymarket.com/predictions/crypto", 5),
@@ -136,7 +136,7 @@ SOURCES = {
 }
 
 # Pages the marker checks assert are CLEAN — no vendor marker may fire on any
-# of them (§18: a marker that matches a good page is worse than no marker).
+# of them (a marker that matches a good page is worse than no marker).
 GOOD_PAGES = ("listing", "listing_tag", "listing_search", "listing_dash",
               "listing_es", "event_multi", "event_single", "event_sports",
               "event_es", "event_no_object", "cdp_extension")
@@ -237,7 +237,7 @@ _SRCSET_RE = re.compile(r'\s(?:srcSet|srcset|sizes|imagesrcset)="[^"]*"')
 # Tailwind class soup is 40-60% of a captured document and NOTHING here reads
 # it: every selector in `product_parser.SELECTORS` is anchored on the
 # `/event/{slug}` href, on purpose, because this site's class names are
-# build-time utilities (§4). Dropping them halves a fixture and cannot hide a
+# build-time utilities. Dropping them halves a fixture and cannot hide a
 # regression in a path that never looked at them — and the column-by-column
 # verification below would catch it if it could.
 _CLASS_RE = re.compile(r'\s(?:class|style|data-nimg|decoding|loading)="[^"]*"')
@@ -252,7 +252,7 @@ def _strip_furniture(html):
         # A browser EXTENSION's injected tag is kept too, and it is the whole
         # reason the `cdp_extension` fixture exists: the marker checks are
         # about markup that is NOT the site's, and a trim that dropped it
-        # would leave them asserting nothing (§18, §21). These tags carry a
+        # would leave them asserting nothing. These tags carry a
         # src and no body, so keeping them costs a few hundred bytes.
         if "-extension://" in body:
             return body
@@ -282,7 +282,7 @@ def _trim_tiles(html, keep_slugs):
     A tile is found the same way the DOM fallback finds it — the outermost
     ancestor still covering exactly ONE event — so this cannot take a
     neighbour's markup with it, which is the same scoping rule and the same
-    reason as §4's junk-link case.
+    reason as the family's junk-link case.
 
     The document is re-serialised by BeautifulSoup here, so a fixture's
     whitespace is not byte-identical to the capture. Its VALUES are, and the
@@ -323,7 +323,7 @@ def _payload_window(payload, keep_skus, keep_foreign=0):
     own, and `markets_from_flight` scopes rows to the event the URL asked
     for. Trim the rails away and that rule cannot be broken by any change,
     so the test asserting it passes on a fixture with nothing to scope out —
-    a check that looks load-bearing and is not (§17). Found by deleting the
+    a check that looks load-bearing and is not. Found by deleting the
     scoping and watching the suite stay green.
     """
     spans = []
@@ -526,7 +526,7 @@ def build(name, filename, url, keep):
 # Guards on what goes into the repository
 # ---------------------------------------------------------------------------
 # PATTERNS rather than the literals of one capture, because the point is to
-# catch the NEXT capture's values too (§10). None of these fired on the
+# catch the NEXT capture's values too. None of these fired on the
 # twelve captures this repo was built from; they are here so that stays true.
 LEAK_PATTERNS = (
     (r"\bsessionId\b", "a session id"),
