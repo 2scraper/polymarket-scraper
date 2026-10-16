@@ -425,11 +425,11 @@ one parses identically to its untrimmed original, column for column, before
 writing anything.
 
 `tests.yml` runs offline only and never touches the site. `canary.yml` runs
-one real `--mode events` walk and one listing run daily, and asserts the
+one real `--mode events` walk and one listing run weekly (Mondays), and asserts the
 pagination, the deep columns, the price coverage and the site's own
 `total_events`.
 
-It also runs **all three engines against one event page every day** and
+It also runs **all three engines against one event page every Monday** and
 checks that they still agree. The offline suite already holds them to the
 same flags, the same shared-module signatures and one `finish_run`, so their
 exit codes and sidecars cannot drift — but only a live run can show whether
