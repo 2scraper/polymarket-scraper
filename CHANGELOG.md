@@ -10,6 +10,8 @@ from a row count, it leads the section in a blockquote.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-10-16
+
 > **Behaviour changes (2026-10-14 audit):**
 > - A run whose browser died under it — pyppeteer's renderer crashing, a
 >   closed DevTools connection — now exits **5** with `stop_reason:
@@ -586,7 +588,8 @@ Each of these was found by running the thing rather than by reading it:
 - An issue template described two other sites at once.
 - `scraper_api_client.py` imported a parser function that no longer exists.
 
-[Unreleased]: https://github.com/2scraper/polymarket-scraper/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/2scraper/polymarket-scraper/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/2scraper/polymarket-scraper/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/2scraper/polymarket-scraper/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/2scraper/polymarket-scraper/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/2scraper/polymarket-scraper/releases/tag/v0.1.0
