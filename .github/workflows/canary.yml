@@ -1,6 +1,6 @@
 name: canary
 
-# One real run a day against polymarket.com, and the only workflow in this
+# One real run a week (Mondays) against polymarket.com, and the only workflow in this
 # repo that touches the site. tests.yml (deliberately) never does — see its
 # own header for why the two are separate.
 #
@@ -54,10 +54,6 @@ on:
   schedule:
     # 06:20 UTC. Off the hour, because everything else in the world runs on
     # it and a queued runner adds nothing but latency.
-    - cron: "20 6 * * *"
-    # Mondays: the same jobs, WITH the paid secrets (proxy, Scraping Browser,
-    # captcha key). On the daily run above those secrets read as empty, so
-    # it takes the free no-secret route and bills nothing.
     - cron: "20 6 * * 1"
   workflow_dispatch:
 
@@ -84,7 +80,7 @@ jobs:
       - name: Walk a listing and three of its event pages (the deep path)
         id: deep
         env:
-          POLYMARKET_PROXY: ${{ (github.event_name != 'schedule' || github.event.schedule == '20 6 * * 1') && secrets.POLYMARKET_PROXY || '' }}
+          POLYMARKET_PROXY: ${{ secrets.POLYMARKET_PROXY }}
         # `set +e`: GitHub runs `run:` steps under `bash -e`, so a non-zero
         # command aborts the step BEFORE the following echo, and
         # continue-on-error does not change that — it stops the step failing
@@ -189,7 +185,7 @@ jobs:
       - name: Scrape the popular listing (the shallow path)
         id: listing
         env:
-          POLYMARKET_PROXY: ${{ (github.event_name != 'schedule' || github.event.schedule == '20 6 * * 1') && secrets.POLYMARKET_PROXY || '' }}
+          POLYMARKET_PROXY: ${{ secrets.POLYMARKET_PROXY }}
         run: |
           set +e
           python3 playwright_scraper.py \
