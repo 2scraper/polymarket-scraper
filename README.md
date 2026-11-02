@@ -1,4 +1,4 @@
-# polymarket-scraper
+# Polymarket Scraper — Prediction Market Prices and Order Books in Python
 
 [![release](https://img.shields.io/github/v/release/2scraper/polymarket-scraper?sort=semver)](https://github.com/2scraper/polymarket-scraper/releases)
 [![tests](https://github.com/2scraper/polymarket-scraper/actions/workflows/tests.yml/badge.svg)](https://github.com/2scraper/polymarket-scraper/actions/workflows/tests.yml)
@@ -7,6 +7,8 @@
 [![licence](https://img.shields.io/badge/licence-MIT-green)](LICENSE)
 [![engines](https://img.shields.io/badge/engines-Playwright%20%7C%20Selenium%20%7C%20pyppeteer%20%7C%20Scraper%20API-lightgrey)](#engines)
 [![runs without an account](https://img.shields.io/badge/runs%20without%20an%20account-yes-brightgreen)](#do-i-need-to-pay-for-anything)
+
+**Polymarket scraper** — an open-source (MIT) Python tool that reads polymarket.com listing pages, categories, searches and single events, and writes one row per market — the question, its price, its order book, its volumes and, from an event page, its on-chain ids — to JSON or CSV. On 2026-09-16 the site served the full page to Playwright's bundled headless Chromium and to `curl` from an ordinary datacentre address, with no account, API key or proxy. Use it to record market prices and volumes over time, or compare two runs with `diff_runs.py`, which reports a change that comes with a data-source change separately from a price move.
 
 A Polymarket prediction-market scraper. Reads a listing page, a category, a
 search or a single event, and writes JSON and CSV with **one row per market**
@@ -445,6 +447,23 @@ job installs for Playwright, because pyppeteer's own build 117 crashed on the
 runners. The flag is optional everywhere else.
 
 ---
+
+## Guides
+
+- [How to run the 2scraper scrapers: setup, proxies, exit codes and access modes](https://2captcha.com/h/how-to-run-2scraper-open-source-scrapers) — installation, `.env`, `.meta.json` for the whole family.
+
+## Related scrapers
+
+Same CLI conventions, same output contract (one row per item, JSON or CSV, a `.meta.json` sidecar and shared exit codes):
+
+- [Screener.in scraper](https://github.com/2scraper/screener-scraper) — Any screener.in stock screen or sector listing
+- [TipRanks scraper](https://github.com/2scraper/tipranks-scraper) — Smart Score, analyst consensus and price targets for any…
+- [Binance scraper](https://github.com/2scraper/binance-scraper) — P2P adverts, copy-trading portfolios and announcements…
+- [Google Finance scraper](https://github.com/2scraper/google-finance-scraper) — Quotes, quarterly financials, analyst targets, OHLCV, market…
+- [OpenSea scraper](https://github.com/2scraper/opensea-scraper) — NFT items, collection rankings and activity feeds…
+- [Better Business Bureau scraper](https://github.com/2scraper/bbb-scraper) — BBB search and category listings with no key or proxy, plus…
+
+All scrapers: [github.com/2scraper](https://github.com/2scraper) · Need another site? [Open a request](https://github.com/2scraper/.github/issues/new?title=%5BScraper%20request%5D%20)
 
 ## Licence
 
