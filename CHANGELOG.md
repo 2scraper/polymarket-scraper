@@ -13,6 +13,7 @@ from a row count, it leads the section in a blockquote.
 ### Changed
 
 - CI only: the canary now runs weekly (Mondays 06:20 UTC) and on a manual dispatch, with its optional secret `POLYMARKET_PROXY` passed on every run; the daily schedule is removed.
+- Docs: the README's note on pyppeteer's bundled Chromium now says the canary ran daily during 2026-10-09 to 10-15 and runs weekly since 2026-10-16, instead of calling it the daily canary.
 
 ## [0.3.0] — 2026-10-16
 
