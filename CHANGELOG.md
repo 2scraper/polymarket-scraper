@@ -12,6 +12,8 @@ from a row count, it leads the section in a blockquote.
 
 ### Changed
 
+- CI only: the offline-checks job runs on `ubuntu-24.04` instead of `ubuntu-latest`, which moved to Ubuntu 26.04, where `actions/setup-python` has no Python 3.9 build. 3.9 stays the supported floor.
+- Docker: the image installs `libatomic1` before Playwright. Recent Playwright releases' Node driver needs it to run `playwright install` at all, and the slim base image does not ship it, so the image build failed.
 - CI only: the canary now runs weekly (Mondays 06:20 UTC) and on a manual dispatch, with its optional secret `POLYMARKET_PROXY` passed on every run; the daily schedule is removed.
 - Docs: the README's note on pyppeteer's bundled Chromium now says the canary ran daily during 2026-10-09 to 10-15 and runs weekly since 2026-10-16, instead of calling it the daily canary.
 
